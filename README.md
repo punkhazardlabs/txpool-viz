@@ -1,3 +1,5 @@
+https://discord.gg/QvS92hk7
+
 # Mempool Visualizer
 
 [Original Idea Proposal](https://github.com/ethpandaops/tooling-wishlist/blob/master/open-ideas/txpool-viz.md)
