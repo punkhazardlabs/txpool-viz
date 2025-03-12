@@ -1,0 +1,13 @@
+endpoints:
+  - name: geth-1
+    url: 'http://localhost:8545'
+    auth_headers: {
+      "Authorization":"Bearer 123"
+    }
+  - name: erigon-1
+    url: 'http://localhost:8547'
+polling:
+  interval: 5s
+  timeout: 2s
+filters:
+  min_gas_price: 1gwei
