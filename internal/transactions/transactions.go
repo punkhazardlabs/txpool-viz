@@ -40,7 +40,6 @@ func PollTransactions(cfg *config.Config) {
 
 			for range ticker.C {
 				ctx, cancel := context.WithTimeout(context.Background(), cfg.Polling["timeout"])
-				defer cancel()
 
 				done := make(chan struct{})
 
@@ -54,6 +53,7 @@ func PollTransactions(cfg *config.Config) {
 				case <-ctx.Done():
 					fmt.Printf("Transaction polling for %s timed out\n", endpoint.Name)
 				}
+				cancel()
 			}
 		}(endpoint)
 	}
@@ -113,22 +113,11 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint) {
 		return
 	}
 
-	pending, err := json.Marshal(rpcResponse.Result.Pending)
-
-	if err != nil {
-		fmt.Println("Error marshalling pending transactions:", err)
-		return
-	}
-
-	queued, err := json.Marshal(rpcResponse.Result.Queued)
-
 	if err != nil {
 		fmt.Println("Error marshalling queued transactions:", err)
 		return
 	}
 
-	fmt.Println("Pending transactions:")
-	fmt.Println(string(pending))
-	fmt.Println("Queued transactions:")
-	fmt.Println(string(queued))
+	fmt.Println("Pending transactions:", len(rpcResponse.Result.Pending))
+	fmt.Println("Queued transactions:", len(rpcResponse.Result.Queued))
 }
