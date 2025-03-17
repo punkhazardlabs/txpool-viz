@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/pkg"
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
@@ -45,7 +46,7 @@ func PollTransactions(cfg *config.Config) {
 				done := make(chan struct{})
 
 				go func() {
-					getTransactions(ctx, endpoint, cfg.RedisClient)
+					getTransactions(ctx, endpoint, cfg.RedisClient, cfg.Logger)
 					close(done)
 				}()
 
@@ -61,8 +62,9 @@ func PollTransactions(cfg *config.Config) {
 	select {}
 }
 
-func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.Client) {
-	fmt.Println("Getting transactions from", endpoint.Name)
+func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.Client, l pkg.Logger) {
+	l.Info("Polling transactions", pkg.Fields{"endpoint": endpoint.Name})
+
 	payload := &RPCRequest{
 		Method:  "txpool_content",
 		Params:  []string{},
@@ -115,6 +117,8 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.C
 
 	processTransactionBatch(ctx, rdb, "pending", rpcResponse.Result.Pending)
 	processTransactionBatch(ctx, rdb, "queued", rpcResponse.Result.Queued)
+
+	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs", len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)) ,pkg.Fields{"endpoint": endpoint.Name})
 }
 
 // storeTransaction processes a batch of transactions and stores them in Redis
@@ -128,8 +132,6 @@ func processTransactionBatch(ctx context.Context, rdb *redis.Client, listName st
 			}
 
 			redisKey := fmt.Sprintf("%s:%s", address, nonce)
-
-			fmt.Println("Storing in Redis:", redisKey)
 
 			// Store transaction in Redis hash
 			if err := rdb.HSet(ctx, listName, redisKey, jsonTx).Err(); err != nil {

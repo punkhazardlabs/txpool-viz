@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	"txpool-viz/pkg"
+
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
@@ -26,6 +28,7 @@ type Config struct {
 	UserCfg     *UserConfig
 	RedisClient *redis.Client
 	Db          string
+	Logger      pkg.Logger
 }
 
 func Load() (*Config, error) {
@@ -65,9 +68,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("Error reading POSTGRES_URL: %v", err)
 	}
 
+	// Initialize Logger
+	log := pkg.NewLogger(nil)
+
 	return &Config{
 		UserCfg:     userConfig,
 		RedisClient: redisClient,
 		Db:          "db",
+		Logger: 		log,
 	}, nil
 }

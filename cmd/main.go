@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	
+
 	"txpool-viz/config"
 	"txpool-viz/internal/transactions"
 )
