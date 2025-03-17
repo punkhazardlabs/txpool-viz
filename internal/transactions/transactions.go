@@ -12,6 +12,7 @@ import (
 	"txpool-viz/config"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/redis/go-redis/v9"
 )
 
 type RPCRequest struct {
@@ -33,18 +34,18 @@ type Result struct {
 }
 
 func PollTransactions(cfg *config.Config) {
-	for _, endpoint := range cfg.Endpoints {
+	for _, endpoint := range cfg.UserCfg.Endpoints {
 		go func(endpoint config.Endpoint) {
-			ticker := time.NewTicker(cfg.Polling["interval"])
+			ticker := time.NewTicker(cfg.UserCfg.Polling["interval"])
 			defer ticker.Stop()
 
 			for range ticker.C {
-				ctx, cancel := context.WithTimeout(context.Background(), cfg.Polling["timeout"])
+				ctx, cancel := context.WithTimeout(context.Background(), cfg.UserCfg.Polling["timeout"])
 
 				done := make(chan struct{})
 
 				go func() {
-					getTransactions(ctx, endpoint)
+					getTransactions(ctx, endpoint, cfg.RedisClient)
 					close(done)
 				}()
 
@@ -60,8 +61,7 @@ func PollTransactions(cfg *config.Config) {
 	select {}
 }
 
-
-func getTransactions(ctx context.Context, endpoint config.Endpoint) {
+func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.Client) {
 	fmt.Println("Getting transactions from", endpoint.Name)
 	payload := &RPCRequest{
 		Method:  "txpool_content",
@@ -113,11 +113,28 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint) {
 		return
 	}
 
-	if err != nil {
-		fmt.Println("Error marshalling queued transactions:", err)
-		return
-	}
+	processTransactionBatch(ctx, rdb, "pending", rpcResponse.Result.Pending)
+	processTransactionBatch(ctx, rdb, "queued", rpcResponse.Result.Queued)
+}
 
-	fmt.Println("Pending transactions:", len(rpcResponse.Result.Pending))
-	fmt.Println("Queued transactions:", len(rpcResponse.Result.Queued))
+// storeTransaction processes a batch of transactions and stores them in Redis
+func processTransactionBatch(ctx context.Context, rdb *redis.Client, listName string, transactions map[string]map[string]*types.Transaction) {
+	for address, txs := range transactions {
+		for nonce, tx := range txs {
+			jsonTx, err := json.Marshal(tx)
+			if err != nil {
+				fmt.Printf("Error marshalling TX (address: %s, nonce: %s): %v\n", address, nonce, err)
+				continue
+			}
+
+			redisKey := fmt.Sprintf("%s:%s", address, nonce)
+
+			fmt.Println("Storing in Redis:", redisKey)
+
+			// Store transaction in Redis hash
+			if err := rdb.HSet(ctx, listName, redisKey, jsonTx).Err(); err != nil {
+				fmt.Printf("Error pushing to Redis (list: %s, key: %s): %v\n", listName, redisKey, err)
+			}
+		}
+	}
 }
