@@ -34,32 +34,27 @@ type Result struct {
 	Queued  map[string]map[string]*types.Transaction `json:"queued"`
 }
 
-func PollTransactions(cfg *config.Config) {
+func PollTransactions(ctx context.Context, cfg *config.Config) {
 	for _, endpoint := range cfg.UserCfg.Endpoints {
 		go func(endpoint config.Endpoint) {
 			ticker := time.NewTicker(cfg.UserCfg.Polling["interval"])
 			defer ticker.Stop()
 
-			for range ticker.C {
-				ctx, cancel := context.WithTimeout(context.Background(), cfg.UserCfg.Polling["timeout"])
+			cfg.Logger.Info("Polling started for:", endpoint.Name)
 
-				done := make(chan struct{})
-
-				go func() {
-					getTransactions(ctx, endpoint, cfg.RedisClient, cfg.Logger)
-					close(done)
-				}()
-
+			for {
 				select {
-				case <-done:
 				case <-ctx.Done():
-					fmt.Printf("Transaction polling for %s timed out\n", endpoint.Name)
+					cfg.Logger.Info("Shutting down PollTransactions for", endpoint.Name)
+					return
+				case <-ticker.C:
+					pollCtx, cancel := context.WithTimeout(ctx, cfg.UserCfg.Polling["timeout"])
+					getTransactions(pollCtx, endpoint, cfg.RedisClient, cfg.Logger)
+					cancel()
 				}
-				cancel()
 			}
 		}(endpoint)
 	}
-	select {}
 }
 
 func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.Client, l pkg.Logger) {
@@ -118,7 +113,7 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.C
 	processTransactionBatch(ctx, rdb, "pending", rpcResponse.Result.Pending)
 	processTransactionBatch(ctx, rdb, "queued", rpcResponse.Result.Queued)
 
-	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs", len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)) ,pkg.Fields{"endpoint": endpoint.Name})
+	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs", len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)), pkg.Fields{"endpoint": endpoint.Name})
 }
 
 // storeTransaction processes a batch of transactions and stores them in Redis
@@ -137,6 +132,8 @@ func processTransactionBatch(ctx context.Context, rdb *redis.Client, listName st
 			if err := rdb.HSet(ctx, listName, redisKey, jsonTx).Err(); err != nil {
 				fmt.Printf("Error pushing to Redis (list: %s, key: %s): %v\n", listName, redisKey, err)
 			}
+
+			// @TODO Create Sorted Lists
 		}
 	}
 }
