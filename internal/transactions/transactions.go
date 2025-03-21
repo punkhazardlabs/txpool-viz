@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/pkg"
 
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/redis/go-redis/v9"
 )
 
 type RPCRequest struct {
@@ -32,37 +34,32 @@ type Result struct {
 	Queued  map[string]map[string]*types.Transaction `json:"queued"`
 }
 
-func PollTransactions(cfg *config.Config) {
-	for _, endpoint := range cfg.Endpoints {
+func PollTransactions(ctx context.Context, cfg *config.Config) {
+	for _, endpoint := range cfg.UserCfg.Endpoints {
 		go func(endpoint config.Endpoint) {
-			ticker := time.NewTicker(cfg.Polling["interval"])
+			ticker := time.NewTicker(cfg.UserCfg.Polling["interval"])
 			defer ticker.Stop()
 
-			for range ticker.C {
-				ctx, cancel := context.WithTimeout(context.Background(), cfg.Polling["timeout"])
+			cfg.Logger.Info("Polling started for:", endpoint.Name)
 
-				done := make(chan struct{})
-
-				go func() {
-					getTransactions(ctx, endpoint)
-					close(done)
-				}()
-
+			for {
 				select {
-				case <-done:
 				case <-ctx.Done():
-					fmt.Printf("Transaction polling for %s timed out\n", endpoint.Name)
+					cfg.Logger.Info("Shutting down PollTransactions for", endpoint.Name)
+					return
+				case <-ticker.C:
+					pollCtx, cancel := context.WithTimeout(ctx, cfg.UserCfg.Polling["timeout"])
+					getTransactions(pollCtx, endpoint, cfg.RedisClient, cfg.Logger)
+					cancel()
 				}
-				cancel()
 			}
 		}(endpoint)
 	}
-	select {}
 }
 
+func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.Client, l pkg.Logger) {
+	l.Info("Polling transactions", pkg.Fields{"endpoint": endpoint.Name})
 
-func getTransactions(ctx context.Context, endpoint config.Endpoint) {
-	fmt.Println("Getting transactions from", endpoint.Name)
 	payload := &RPCRequest{
 		Method:  "txpool_content",
 		Params:  []string{},
@@ -113,11 +110,30 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint) {
 		return
 	}
 
-	if err != nil {
-		fmt.Println("Error marshalling queued transactions:", err)
-		return
-	}
+	processTransactionBatch(ctx, rdb, "pending", rpcResponse.Result.Pending)
+	processTransactionBatch(ctx, rdb, "queued", rpcResponse.Result.Queued)
 
-	fmt.Println("Pending transactions:", len(rpcResponse.Result.Pending))
-	fmt.Println("Queued transactions:", len(rpcResponse.Result.Queued))
+	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs", len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)), pkg.Fields{"endpoint": endpoint.Name})
+}
+
+// storeTransaction processes a batch of transactions and stores them in Redis
+func processTransactionBatch(ctx context.Context, rdb *redis.Client, listName string, transactions map[string]map[string]*types.Transaction) {
+	for address, txs := range transactions {
+		for nonce, tx := range txs {
+			jsonTx, err := json.Marshal(tx)
+			if err != nil {
+				fmt.Printf("Error marshalling TX (address: %s, nonce: %s): %v\n", address, nonce, err)
+				continue
+			}
+
+			redisKey := fmt.Sprintf("%s:%s", address, nonce)
+
+			// Store transaction in Redis hash
+			if err := rdb.HSet(ctx, listName, redisKey, jsonTx).Err(); err != nil {
+				fmt.Printf("Error pushing to Redis (list: %s, key: %s): %v\n", listName, redisKey, err)
+			}
+
+			// @TODO Create Sorted Lists
+		}
+	}
 }
