@@ -10,12 +10,13 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	
 	"txpool-viz/config"
 	"txpool-viz/internal/broker"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/transactions"
 	"txpool-viz/pkg"
-
+	
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -28,36 +29,33 @@ type Controller struct {
 	shutdown   chan struct{}
 }
 
-func New() *Controller {
+func NewController(cfg *config.Config, srvc *service.Service) *Controller {
 	return &Controller{
-		router:   gin.Default(),
-		shutdown: make(chan struct{}),
+		Config:     cfg,
+		Services:   srvc,
+		router:     gin.Default(),
+		shutdown:   make(chan struct{}),
 	}
 }
 
 func (c *Controller) Serve() error {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Graceful shutdown signal handler
-	go func() {
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-			<-sigChan
-			log.Println("Shutting down...")
-			cancel()
-	}()
+	go c.handleShutdown(cancel)
 
 	// Initialize services and configurations
 	if err := c.initialize(); err != nil {
-			return err
+		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
 	c.configureRouter()
 
 	go func() {
-			if err := c.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					log.Fatalf("Server failed: %v", err)
-			}
+		if err := c.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Server failed: %v", err)
+		}
 	}()
 
 	// Start polling transactions
@@ -67,47 +65,50 @@ func (c *Controller) Serve() error {
 	go broker.ProcessTransactions(ctx, c.Config, c.Services)
 
 	<-ctx.Done()
-
 	return nil
 }
 
+func (c *Controller) handleShutdown(cancel context.CancelFunc) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	log.Println("Shutting down...")
+	cancel()
+}
+
 func (c *Controller) initialize() error {
-	if cfg, err := config.Load(); err != nil {
-		return err
-	} else {
-		c.Config = cfg
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
 	}
+	c.Config = cfg
 
-	if srvc, err := c.setupServices(); err != nil {
-		return err
-	} else {
-		c.Services = srvc
+	srvc, err := c.setupServices()
+	if err != nil {
+		return fmt.Errorf("failed to set up services: %w", err)
 	}
-
+	c.Services = srvc
 	return nil
 }
 
 func (c *Controller) setupServices() (*service.Service, error) {
 	// Initialize redis client
 	redisUrl := os.Getenv("REDIS_URL")
-
 	if redisUrl == "" {
-		return nil, fmt.Errorf("Error reading REDIS_URL from environment")
+		return nil, errors.New("REDIS_URL environment variable is not set")
 	}
 
 	redisOptions, err := redis.ParseURL(redisUrl)
-
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing REDIS_URL: %v", err)
+		return nil, fmt.Errorf("error parsing REDIS_URL: %w", err)
 	}
 
 	redisClient := redis.NewClient(redisOptions)
 
 	// Initialize Postgres connection
 	conn := os.Getenv("POSTGRES_URL")
-
 	if conn == "" {
-		return nil, fmt.Errorf("Error reading POSTGRES_URL: %v", err)
+		return nil, errors.New("POSTGRES_URL environment variable is not set")
 	}
 
 	// Initialize Logger
@@ -115,7 +116,7 @@ func (c *Controller) setupServices() (*service.Service, error) {
 
 	return &service.Service{
 		Redis:  redisClient,
-		DB:     "",
+		DB:     conn, // Assuming you connect to Postgres here
 		Logger: logger,
 	}, nil
 }
