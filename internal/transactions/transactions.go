@@ -123,9 +123,15 @@ func processTransactionBatch(ctx context.Context, storage *Storage, listName str
 			metadata := TransactionMetadata{
 				Nonce:      tx.Nonce(),
 				From:       address,
-				To:         tx.To().String(),
 				IsContract: false, // This would need to be determined by checking the contract code
 				Timestamp:  time.Now().Unix(),
+			}
+
+			// Handle To address, which can be nil for contract creation
+			if tx.To() != nil {
+				metadata.To = tx.To().String()
+			} else {
+				metadata.To = "" // Empty string for contract creation
 			}
 
 			// Set transaction type and gas-related fields
@@ -147,8 +153,8 @@ func processTransactionBatch(ctx context.Context, storage *Storage, listName str
 				Metadata: metadata,
 			}
 
-			// Store the transaction
-			if err := storage.StoreTransaction(ctx, storedTx); err != nil {
+			// Store the transaction in the appropriate queue
+			if err := storage.StoreTransaction(ctx, storedTx, listName); err != nil {
 				fmt.Printf("Error storing TX (address: %s, nonce: %d): %v\n", address, nonce, err)
 			}
 		}

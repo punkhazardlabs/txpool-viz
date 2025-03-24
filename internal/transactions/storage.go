@@ -32,13 +32,20 @@ func NewStorage(rdb *redis.Client) *Storage {
 	return &Storage{rdb: rdb}
 }
 
-// StoreTransaction stores a transaction with its metadata
-func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction) error {
-	// Store the full transaction data
-	txKey := fmt.Sprintf("%s%s:%d", prefixTx, tx.Metadata.From, tx.Metadata.Nonce)
+// StoreTransaction stores a transaction with its metadata in the specified queue
+func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction, queue string) error {
+	// Create the transaction key
+	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
+
+	// Store the full transaction data in the queue hash
 	txData, err := json.Marshal(tx)
 	if err != nil {
 		return fmt.Errorf("error marshaling transaction: %w", err)
+	}
+
+	// Store in Redis queue hash
+	if err := s.rdb.HSet(ctx, queue, txKey, txData).Err(); err != nil {
+		return fmt.Errorf("error storing transaction in queue %s: %w", queue, err)
 	}
 
 	// Store metadata separately for efficient filtering
@@ -48,68 +55,62 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction) e
 		return fmt.Errorf("error marshaling metadata: %w", err)
 	}
 
-	// Store in Redis
-	pipe := s.rdb.Pipeline()
-	pipe.Set(ctx, txKey, txData, 24*time.Hour)
-	pipe.Set(ctx, metaKey, metaData, 24*time.Hour)
-
 	// Add to indexes
-	s.addToIndexes(ctx, pipe, tx)
+	s.addToIndexes(ctx, tx, queue)
 
-	_, err = pipe.Exec(ctx)
-	return err
+	// Store metadata
+	if err := s.rdb.Set(ctx, metaKey, metaData, 24*time.Hour).Err(); err != nil {
+		return fmt.Errorf("error storing metadata: %w", err)
+	}
+
+	return nil
 }
 
 // addToIndexes adds the transaction to various indexes for efficient filtering
-func (s *Storage) addToIndexes(ctx context.Context, pipe redis.Pipeliner, tx *StoredTransaction) {
+func (s *Storage) addToIndexes(ctx context.Context, tx *StoredTransaction, queue string) {
+	pipe := s.rdb.Pipeline()
+
 	// Index by gas price
 	if tx.Metadata.GasPrice != nil {
-		pipe.ZAdd(ctx, fmt.Sprintf("%sgas_price", prefixIndex), redis.Z{
+		pipe.ZAdd(ctx, fmt.Sprintf("%sgas_price:%s", prefixIndex, queue), redis.Z{
 			Score:  float64(tx.Metadata.GasPrice.Int64()),
 			Member: fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce),
 		})
 	}
 
 	// Index by nonce
-	pipe.ZAdd(ctx, fmt.Sprintf("%snonce", prefixIndex), redis.Z{
+	pipe.ZAdd(ctx, fmt.Sprintf("%snonce:%s", prefixIndex, queue), redis.Z{
 		Score:  float64(tx.Metadata.Nonce),
 		Member: fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce),
 	})
 
 	// Index by type
-	pipe.SAdd(ctx, fmt.Sprintf("%stype:%d", prefixIndex, tx.Metadata.Type),
+	pipe.SAdd(ctx, fmt.Sprintf("%stype:%d:%s", prefixIndex, tx.Metadata.Type, queue),
 		fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
 
 	// Index by address
-	pipe.SAdd(ctx, fmt.Sprintf("%sfrom:%s", prefixIndex, tx.Metadata.From),
+	pipe.SAdd(ctx, fmt.Sprintf("%sfrom:%s:%s", prefixIndex, tx.Metadata.From, queue),
 		fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
 	if tx.Metadata.To != "" {
-		pipe.SAdd(ctx, fmt.Sprintf("%sto:%s", prefixIndex, tx.Metadata.To),
+		pipe.SAdd(ctx, fmt.Sprintf("%sto:%s:%s", prefixIndex, tx.Metadata.To, queue),
 			fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
 	}
+
+	pipe.Exec(ctx)
 }
 
-// FilterTransactions retrieves transactions based on filter criteria
-func (s *Storage) FilterTransactions(ctx context.Context, criteria FilterCriteria) ([]StoredTransaction, error) {
-	// Start with all transactions
-	baseKey := fmt.Sprintf("%s*", prefixTx)
-	iter := s.rdb.Scan(ctx, 0, baseKey, 0).Iterator()
+// FilterTransactions retrieves transactions based on filter criteria from a specific queue
+func (s *Storage) FilterTransactions(ctx context.Context, queue string, criteria FilterCriteria) ([]StoredTransaction, error) {
+	// Get all transactions from the queue
+	txMap, err := s.rdb.HGetAll(ctx, queue).Result()
+	if err != nil {
+		return nil, fmt.Errorf("error getting transactions from queue %s: %w", queue, err)
+	}
 
 	var results []StoredTransaction
-	for iter.Next(ctx) {
-		key := iter.Val()
-		if !strings.HasPrefix(key, prefixTx) {
-			continue
-		}
-
-		// Get transaction data
-		txData, err := s.rdb.Get(ctx, key).Bytes()
-		if err != nil {
-			continue
-		}
-
+	for _, txData := range txMap {
 		var tx StoredTransaction
-		if err := json.Unmarshal(txData, &tx); err != nil {
+		if err := json.Unmarshal([]byte(txData), &tx); err != nil {
 			continue
 		}
 
@@ -119,7 +120,7 @@ func (s *Storage) FilterTransactions(ctx context.Context, criteria FilterCriteri
 		}
 	}
 
-	return results, iter.Err()
+	return results, nil
 }
 
 // matchesFilter checks if a transaction matches the filter criteria
@@ -186,18 +187,23 @@ func (s *Storage) matchesFilter(tx StoredTransaction, criteria FilterCriteria) b
 	return true
 }
 
-// GroupTransactions groups transactions based on grouping criteria
-func (s *Storage) GroupTransactions(ctx context.Context, criteria GroupingCriteria) (*GroupedTransactions, error) {
-	// Get all transactions
-	txs, err := s.FilterTransactions(ctx, FilterCriteria{})
+// GroupTransactions groups transactions based on grouping criteria from a specific queue
+func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria GroupingCriteria) (*GroupedTransactions, error) {
+	// Get all transactions from the queue
+	txMap, err := s.rdb.HGetAll(ctx, queue).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting transactions from queue %s: %w", queue, err)
 	}
 
 	groups := make(map[string][]StoredTransaction)
 	var totalTxs int64
 
-	for _, tx := range txs {
+	for _, txData := range txMap {
+		var tx StoredTransaction
+		if err := json.Unmarshal([]byte(txData), &tx); err != nil {
+			continue
+		}
+
 		groupKey := s.getGroupKey(tx, criteria)
 		groups[groupKey] = append(groups[groupKey], tx)
 		totalTxs++
