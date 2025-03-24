@@ -5,10 +5,7 @@ import (
 	"os"
 	"time"
 
-	"txpool-viz/pkg"
-
 	_ "github.com/joho/godotenv/autoload"
-	"github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,21 +15,14 @@ type Endpoint struct {
 	AuthHeaders map[string]string `yaml:"auth_headers"`
 }
 
-type UserConfig struct {
+type Config struct {
 	Endpoints []Endpoint               `yaml:"endpoints"`
 	Polling   map[string]time.Duration `yaml:"polling"`
 	Filters   map[string]string        `yaml:"filters"`
 }
 
-type Config struct {
-	UserCfg     *UserConfig
-	RedisClient *redis.Client
-	Db          string
-	Logger      pkg.Logger
-}
-
 func Load() (*Config, error) {
-	userConfig := &UserConfig{}
+	userConfig := &Config{}
 	cfgData, err := os.ReadFile("config.yaml")
 
 	if err != nil {
@@ -46,35 +36,5 @@ func Load() (*Config, error) {
 		panic(throwErr)
 	}
 
-	// Initialize redis client
-	redisUrl := os.Getenv("REDIS_URL")
-
-	if redisUrl == "" {
-		return nil, fmt.Errorf("Error reading REDIS_URL: %v", err)
-	}
-
-	redisOptions, err := redis.ParseURL(redisUrl)
-
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing REDIS_URL: %v", err)
-	}
-
-	redisClient := redis.NewClient(redisOptions)
-
-	// Initialize Postgres connection
-	conn := os.Getenv("POSTGRES_URL")
-
-	if conn == "" {
-		return nil, fmt.Errorf("Error reading POSTGRES_URL: %v", err)
-	}
-
-	// Initialize Logger
-	log := pkg.NewLogger(nil)
-
-	return &Config{
-		UserCfg:     userConfig,
-		RedisClient: redisClient,
-		Db:          "db",
-		Logger: 		log,
-	}, nil
+	return userConfig, nil
 }
