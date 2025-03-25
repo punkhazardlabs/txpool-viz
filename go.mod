@@ -2,8 +2,6 @@ module txpool-viz
 
 go 1.23.0
 
-toolchain go1.23.7
-
 require (
 	github.com/ethereum/go-ethereum v1.15.5
 	github.com/joho/godotenv v1.5.1

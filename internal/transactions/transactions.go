@@ -13,7 +13,6 @@ import (
 	"txpool-viz/pkg"
 
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/redis/go-redis/v9"
 )
 
 type RPCRequest struct {
@@ -35,6 +34,8 @@ type Result struct {
 }
 
 func PollTransactions(ctx context.Context, cfg *config.Config) {
+	storage := NewStorage(cfg.RedisClient)
+
 	for _, endpoint := range cfg.UserCfg.Endpoints {
 		go func(endpoint config.Endpoint) {
 			ticker := time.NewTicker(cfg.UserCfg.Polling["interval"])
@@ -49,7 +50,7 @@ func PollTransactions(ctx context.Context, cfg *config.Config) {
 					return
 				case <-ticker.C:
 					pollCtx, cancel := context.WithTimeout(ctx, cfg.UserCfg.Polling["timeout"])
-					getTransactions(pollCtx, endpoint, cfg.RedisClient, cfg.Logger)
+					getTransactions(pollCtx, endpoint, storage, cfg.Logger)
 					cancel()
 				}
 			}
@@ -57,7 +58,7 @@ func PollTransactions(ctx context.Context, cfg *config.Config) {
 	}
 }
 
-func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.Client, l pkg.Logger) {
+func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *Storage, l pkg.Logger) {
 	l.Info("Polling transactions", pkg.Fields{"endpoint": endpoint.Name})
 
 	payload := &RPCRequest{
@@ -68,31 +69,27 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.C
 	}
 
 	requestData, err := json.Marshal(payload)
-
 	if err != nil {
-		fmt.Println("Error marshalling request data:", err)
+		l.Error("Error marshalling request data", pkg.Fields{"error": err})
 		return
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.Url, bytes.NewBuffer(requestData))
-
 	if err != nil {
-		fmt.Println("Error marshalling request data:", err)
+		l.Error("Error creating request", pkg.Fields{"error": err})
 		return
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
-
 	resp, err := client.Do(req)
-
 	if err != nil {
 		if ctx.Err() != nil {
-			fmt.Printf("Request to %s cancelled: %v\n", endpoint.Name, ctx.Err())
+			l.Error("Request cancelled", pkg.Fields{"endpoint": endpoint.Name, "error": ctx.Err()})
 			return
 		}
-		fmt.Println("Error sending request:", err)
+		l.Error("Error sending request", pkg.Fields{"error": err})
 		return
 	}
 
@@ -100,40 +97,66 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, rdb *redis.C
 
 	responseData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response:", err)
+		l.Error("Error reading response", pkg.Fields{"error": err})
 		return
 	}
 
 	var rpcResponse RPCResponse
 	if err = json.Unmarshal(responseData, &rpcResponse); err != nil {
-		fmt.Println("Error unmarshalling response data:", err)
+		l.Error("Error unmarshalling response data", pkg.Fields{"error": err})
 		return
 	}
 
-	processTransactionBatch(ctx, rdb, "pending", rpcResponse.Result.Pending)
-	processTransactionBatch(ctx, rdb, "queued", rpcResponse.Result.Queued)
+	processTransactionBatch(ctx, storage, "pending", rpcResponse.Result.Pending)
+	processTransactionBatch(ctx, storage, "queued", rpcResponse.Result.Queued)
 
-	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs", len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)), pkg.Fields{"endpoint": endpoint.Name})
+	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs",
+		len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)),
+		pkg.Fields{"endpoint": endpoint.Name})
 }
 
-// storeTransaction processes a batch of transactions and stores them in Redis
-func processTransactionBatch(ctx context.Context, rdb *redis.Client, listName string, transactions map[string]map[string]*types.Transaction) {
+// processTransactionBatch processes a batch of transactions and stores them
+func processTransactionBatch(ctx context.Context, storage *Storage, listName string, transactions map[string]map[string]*types.Transaction) {
 	for address, txs := range transactions {
 		for nonce, tx := range txs {
-			jsonTx, err := json.Marshal(tx)
-			if err != nil {
-				fmt.Printf("Error marshalling TX (address: %s, nonce: %s): %v\n", address, nonce, err)
-				continue
+			// Create metadata for the transaction
+			metadata := TransactionMetadata{
+				Nonce:      tx.Nonce(),
+				From:       address,
+				IsContract: false, // This would need to be determined by checking the contract code
+				Timestamp:  time.Now().Unix(),
 			}
 
-			redisKey := fmt.Sprintf("%s:%s", address, nonce)
-
-			// Store transaction in Redis hash
-			if err := rdb.HSet(ctx, listName, redisKey, jsonTx).Err(); err != nil {
-				fmt.Printf("Error pushing to Redis (list: %s, key: %s): %v\n", listName, redisKey, err)
+			// Handle To address, which can be nil for contract creation
+			if tx.To() != nil {
+				metadata.To = tx.To().String()
+			} else {
+				metadata.To = "" // Empty string for contract creation
 			}
 
-			// @TODO Create Sorted Lists
+			// Set transaction type and gas-related fields
+			switch tx.Type() {
+			case types.BlobTxType:
+				metadata.Type = BlobTx
+				// Note: We can't access MaxFeePerBlobGas directly as it's not exposed in the interface
+			case types.DynamicFeeTxType:
+				metadata.Type = EIP1559Tx
+				// Note: We can't access MaxFeePerGas and MaxPriorityFee directly as they're not exposed in the interface
+			default:
+				metadata.Type = LegacyTx
+				metadata.GasPrice = tx.GasPrice()
+			}
+
+			// Create stored transaction
+			storedTx := &StoredTransaction{
+				Tx:       tx,
+				Metadata: metadata,
+			}
+
+			// Store the transaction in the appropriate queue
+			if err := storage.StoreTransaction(ctx, storedTx, listName); err != nil {
+				fmt.Printf("Error storing TX (address: %s, nonce: %d): %v\n", address, nonce, err)
+			}
 		}
 	}
 }
