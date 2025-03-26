@@ -1,41 +1,29 @@
 package main
 
 import (
-	"context"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
 
 	"txpool-viz/config"
-	"txpool-viz/internal/broker"
-	"txpool-viz/internal/transactions"
+	"txpool-viz/internal/controller"
+	"txpool-viz/internal/service"
 )
 
 func main() {
+	// Load configuration
 	cfg, err := config.Load()
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Handle OS signals for graceful shutdown
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		<-sigChan
-		log.Println("Shutting down...")
-		cancel()
-	}()
-
 	if err != nil {
-		log.Fatalf("Error loading config: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
-	
-	// Start polling transactions
-	transactions.PollTransactions(ctx, cfg)
 
-	// Start processing transactions
-	broker.ProcessTransactions(ctx, cfg)
+	// Initialize services
+	srvc, err := service.NewService(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize services: %v", err)
+	}
 
-	<-ctx.Done()
-	log.Println("Shutdown complete")
+	// Create and start the controller
+	ctrl := controller.NewController(cfg, srvc)
+	if err := ctrl.Serve(); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
 }

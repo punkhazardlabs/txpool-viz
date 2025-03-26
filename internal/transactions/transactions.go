@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/internal/service"
 	"txpool-viz/pkg"
 
 	"github.com/ethereum/go-ethereum/core/types"
@@ -33,24 +34,25 @@ type Result struct {
 	Queued  map[string]map[string]*types.Transaction `json:"queued"`
 }
 
-func PollTransactions(ctx context.Context, cfg *config.Config) {
-	storage := NewStorage(cfg.RedisClient)
+// PollTransactions polls transactions from endpoints at regular intervals
+func PollTransactions(ctx context.Context, cfg *config.Config, srvc *service.Service) {
+	storage := NewStorage(srvc.Redis, srvc.Logger)
 
-	for _, endpoint := range cfg.UserCfg.Endpoints {
+	for _, endpoint := range cfg.Endpoints {
 		go func(endpoint config.Endpoint) {
-			ticker := time.NewTicker(cfg.UserCfg.Polling["interval"])
+			ticker := time.NewTicker(cfg.Polling["interval"])
 			defer ticker.Stop()
 
-			cfg.Logger.Info("Polling started for:", endpoint.Name)
+			srvc.Logger.Info("Polling started for:", endpoint.Name)
 
 			for {
 				select {
 				case <-ctx.Done():
-					cfg.Logger.Info("Shutting down PollTransactions for", endpoint.Name)
+					srvc.Logger.Info("Shutting down PollTransactions for", endpoint.Name)
 					return
 				case <-ticker.C:
-					pollCtx, cancel := context.WithTimeout(ctx, cfg.UserCfg.Polling["timeout"])
-					getTransactions(pollCtx, endpoint, storage, cfg.Logger)
+					pollCtx, cancel := context.WithTimeout(ctx, cfg.Polling["timeout"])
+					getTransactions(pollCtx, endpoint, storage, srvc.Logger)
 					cancel()
 				}
 			}
@@ -155,7 +157,7 @@ func processTransactionBatch(ctx context.Context, storage *Storage, listName str
 
 			// Store the transaction in the appropriate queue
 			if err := storage.StoreTransaction(ctx, storedTx, listName); err != nil {
-				fmt.Printf("Error storing TX (address: %s, nonce: %d): %v\n", address, nonce, err)
+				fmt.Printf("Error storing TX (address: %s, nonce: %s): %v\n", address, nonce, err)
 			}
 		}
 	}

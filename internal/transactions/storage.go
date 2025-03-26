@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"txpool-viz/pkg"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -24,12 +25,16 @@ const (
 
 // Storage handles all Redis operations for transactions
 type Storage struct {
-	rdb *redis.Client
+	rdb    *redis.Client
+	logger pkg.Logger
 }
 
 // NewStorage creates a new storage instance
-func NewStorage(rdb *redis.Client) *Storage {
-	return &Storage{rdb: rdb}
+func NewStorage(rdb *redis.Client, l pkg.Logger) *Storage {
+	return &Storage{
+		rdb:    rdb,
+		logger: l,
+	}
 }
 
 // StoreTransaction stores a transaction with its metadata in the specified queue
@@ -96,7 +101,11 @@ func (s *Storage) addToIndexes(ctx context.Context, tx *StoredTransaction, queue
 			fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
 	}
 
-	pipe.Exec(ctx)
+	_, err := pipe.Exec(ctx)
+
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("Error adding transaction %s", err))
+	}
 }
 
 // FilterTransactions retrieves transactions based on filter criteria from a specific queue
