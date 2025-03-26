@@ -34,6 +34,7 @@ type Result struct {
 	Queued  map[string]map[string]*types.Transaction `json:"queued"`
 }
 
+// PollTransactions polls transactions from endpoints at regular intervals
 func PollTransactions(ctx context.Context, cfg *config.Config, srvc *service.Service) {
 	storage := NewStorage(srvc.Redis, srvc.Logger)
 

@@ -10,13 +10,15 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	
+
 	"txpool-viz/config"
 	"txpool-viz/internal/broker"
+	"txpool-viz/internal/controller/handler"
+	route "txpool-viz/internal/controller/routes"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/transactions"
 	"txpool-viz/pkg"
-	
+
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,10 +33,10 @@ type Controller struct {
 
 func NewController(cfg *config.Config, srvc *service.Service) *Controller {
 	return &Controller{
-		Config:     cfg,
-		Services:   srvc,
-		router:     gin.Default(),
-		shutdown:   make(chan struct{}),
+		Config:   cfg,
+		Services: srvc,
+		router:   gin.Default(),
+		shutdown: make(chan struct{}),
 	}
 }
 
@@ -50,7 +52,7 @@ func (c *Controller) Serve() error {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
-	c.configureRouter()
+	c.configureRouter(ctx, c.Services.Redis, c.Services.Logger)
 
 	go func() {
 		if err := c.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -121,9 +123,14 @@ func (c *Controller) setupServices() (*service.Service, error) {
 	}, nil
 }
 
-func (c *Controller) configureRouter() {
+func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l pkg.Logger) {
+	handler := handler.NewHandler(ctx, r, l)
+
+
+	route.RegisterRoutes(c.router, &handler)
+
 	c.httpServer = &http.Server{
-		Addr:         "localhost:8080",
+		Addr:         fmt.Sprintf(":%s", os.Getenv("PORT")),
 		Handler:      c.router,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
