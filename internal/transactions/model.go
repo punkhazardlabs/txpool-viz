@@ -2,8 +2,6 @@ package transactions
 
 import (
 	"math/big"
-
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // TransactionType represents the type of Ethereum transaction
@@ -13,21 +11,39 @@ const (
 	LegacyTx TransactionType = iota
 	EIP1559Tx
 	BlobTx
+	EIP2930Tx
 	EIP7702Tx
+)
+
+// TransactionStatus represents the current state of a transaction
+type TransactionStatus int
+
+const (
+	StatusQueued TransactionStatus = iota
+	StatusPending
+	StatusMined
+	StatusDropped
 )
 
 // TransactionMetadata contains additional metadata for filtering and grouping
 type TransactionMetadata struct {
-	Type             TransactionType `json:"type"`
-	GasPrice         *big.Int        `json:"gas_price,omitempty"`
-	MaxFeePerGas     *big.Int        `json:"max_fee_per_gas,omitempty"`
-	MaxPriorityFee   *big.Int        `json:"max_priority_fee,omitempty"`
-	MaxFeePerBlobGas *big.Int        `json:"max_fee_per_blob_gas,omitempty"`
-	Nonce            uint64          `json:"nonce"`
-	From             string          `json:"from"`
-	To               string          `json:"to"`
-	IsContract       bool            `json:"is_contract"`
-	Timestamp        int64           `json:"timestamp"`
+	Type             TransactionType   `json:"type"`
+	GasPrice         *big.Int          `json:"gas_price,omitempty"`
+	MaxFeePerGas     *big.Int          `json:"max_fee_per_gas,omitempty"`
+	MaxPriorityFee   *big.Int          `json:"max_priority_fee,omitempty"`
+	MaxFeePerBlobGas *big.Int          `json:"max_fee_per_blob_gas,omitempty"`
+	Nonce            uint64            `json:"nonce"`
+	From             string            `json:"from"`
+	To               string            `json:"to"`
+	IsContract       bool              `json:"is_contract"`
+	Timestamp        int64             `json:"timestamp"`
+	Status           TransactionStatus `json:"status"`
+	TimeReceived     int64             `json:"time_received"` // When first seen in mempool
+	TimePending      int64             `json:"time_pending"`  // When moved to pending
+	TimeMined        int64             `json:"time_mined"`    // When mined
+	TimeDropped      int64             `json:"time_dropped"`  // When dropped
+	BlockNumber      uint64            `json:"block_number"`  // If mined
+	BlockHash        string            `json:"block_hash"`    // If mined
 }
 
 // FilterCriteria represents the filtering options
@@ -63,9 +79,9 @@ type GroupingCriteria struct {
 	} `json:"nonce_ranges,omitempty"`
 }
 
-// StoredTransaction combines the original transaction with metadata
+// StoredTransaction represents a transaction with its metadata
 type StoredTransaction struct {
-	Tx       *types.Transaction  `json:"tx"`
+	Hash     string              `json:"hash"`
 	Metadata TransactionMetadata `json:"metadata"`
 }
 

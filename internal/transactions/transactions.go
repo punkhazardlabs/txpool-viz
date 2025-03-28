@@ -151,7 +151,7 @@ func processTransactionBatch(ctx context.Context, storage *Storage, listName str
 
 			// Create stored transaction
 			storedTx := &StoredTransaction{
-				Tx:       tx,
+				Hash:     tx.Hash().Hex(),
 				Metadata: metadata,
 			}
 
