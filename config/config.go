@@ -11,7 +11,8 @@ import (
 
 type Endpoint struct {
 	Name        string
-	Url         string
+	RPCUrl      string						`yaml:"rpc_url"`
+	Websocket   string						`yaml:"socket"`
 	AuthHeaders map[string]string `yaml:"auth_headers"`
 }
 

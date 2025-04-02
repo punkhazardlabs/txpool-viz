@@ -3,6 +3,7 @@ module txpool-viz
 go 1.23.0
 
 require (
+	github.com/coder/websocket v1.8.13
 	github.com/ethereum/go-ethereum v1.15.5
 	github.com/gin-gonic/gin v1.10.0
 	github.com/gorilla/websocket v1.5.3
