@@ -13,14 +13,16 @@ import (
 	"txpool-viz/internal/service"
 	"txpool-viz/pkg"
 
+	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/redis/go-redis/v9"
 )
 
 type RPCRequest struct {
-	Method  string
-	Params  []string
-	Id      int
-	Jsonrpc string
+	Method  string   `json:"method"`
+	Params  []string `json:"params"`
+	Id      int      `json:"id"`
+	Jsonrpc string   `json:"jsonrpc"`
 }
 
 type RPCResponse struct {
@@ -29,9 +31,89 @@ type RPCResponse struct {
 	Result  Result `json:"result"`
 }
 
+type SubscriptionResponse struct {
+	Jsonrpc string             `json:"jsonrpc"`
+	Method  string             `json:"method"`
+	Params  SubscriptionParams `json:"params"`
+}
+
+type SubscriptionParams struct {
+	Subscrition string `json:"subscription"`
+	TxHash      string `json:"result"`
+}
+
 type Result struct {
 	Pending map[string]map[string]*types.Transaction `json:"pending"`
 	Queued  map[string]map[string]*types.Transaction `json:"queued"`
+}
+
+func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service) {
+	// Start listening to txhashes
+	ProcessTransactions(ctx, cfg, srvc)
+
+	// Start the streaming txhashes
+	for _, endpoint := range cfg.Endpoints {
+		go streamEndpoint(ctx, endpoint, srvc.Logger, *srvc.Redis)
+	}
+}
+
+func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger, r redis.Client) {
+	conn, resp, err := websocket.Dial(ctx, endpoint.Websocket, nil)
+
+	if err != nil {
+		l.Error(fmt.Sprintf("Error connecting to websocket. Error: %s", err), pkg.Fields{"endpoint": endpoint.Name})
+		return
+	}
+
+	l.Debug(fmt.Sprintf("Endpoint: %s Websocket connected with repsonse %s", endpoint.Name, resp.Status))
+
+	defer conn.Close(websocket.StatusNormalClosure, "Closing connection")
+
+	payload := &RPCRequest{
+		Method:  "eth_subscribe",
+		Params:  []string{"newPendingTransactions"},
+		Id:      1,
+		Jsonrpc: "2.0",
+	}
+
+	requestData, _ := json.Marshal(payload)
+
+	if err = conn.Write(ctx, websocket.MessageText, requestData); err != nil {
+		l.Error(fmt.Sprintf("Error sending conection request: %s", err))
+	}
+
+	_, msg, err := conn.Read(ctx)
+
+	if err != nil {
+		l.Info(fmt.Sprintf("Failed to read response from socket: %s", endpoint.Name))
+	}
+
+	var response SubscriptionResponse
+	if err = json.Unmarshal(msg, &response); err != nil {
+		l.Error(fmt.Sprintf("Response Error: %s", err))
+	}
+
+	l.Debug(fmt.Sprintf("Subscription ID for endpoint: %s", msg), pkg.Fields{"endpoint": endpoint.Name})
+	l.Info("Websocket connected", pkg.Fields{"endpoint": endpoint.Name})
+
+	for {
+		_, msg, err := conn.Read(context.Background())
+
+		if err != nil {
+			l.Error("Error reading stream", pkg.Fields{"endpoint": endpoint.Name})
+		}
+
+		var event SubscriptionResponse
+
+		err = json.Unmarshal(msg, &event)
+		if err != nil {
+			l.Error("JSON parse error")
+			continue
+		}
+
+		// Queue the TX
+		r.RPush(context.Background(), fmt.Sprintf("stream:%s", endpoint.Name), fmt.Sprintf("%s:%s", endpoint.Name, event.Params.TxHash))
+	}
 }
 
 // PollTransactions polls transactions from endpoints at regular intervals
@@ -76,7 +158,7 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *Sto
 		return
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.Url, bytes.NewBuffer(requestData))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.RPCUrl, bytes.NewBuffer(requestData))
 	if err != nil {
 		l.Error("Error creating request", pkg.Fields{"error": err})
 		return
@@ -151,7 +233,7 @@ func processTransactionBatch(ctx context.Context, storage *Storage, listName str
 
 			// Create stored transaction
 			storedTx := &StoredTransaction{
-				Tx:       tx,
+				Hash:     tx.Hash().Hex(),
 				Metadata: metadata,
 			}
 

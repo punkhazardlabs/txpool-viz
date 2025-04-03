@@ -1,13 +1,16 @@
 endpoints:
-  - name: geth-1
-    url: 'http://localhost:8545'
-    auth_headers: {
-      "Authorization":"Bearer 123"
-    }
-  - name: erigon-1
-    url: 'http://localhost:8547'
+  - name: nethermind
+    rpc_url: 'http://127.0.0.1:62956'
+    socket: 'ws://127.0.0.1:62957'
+  - name: geth
+    rpc_url: 'http://127.0.0.1:62945'
+    socket: 'ws://127.0.0.1:62946'
+  - name: reth
+    rpc_url: 'http://127.0.0.1:63146'
+    socket: 'ws://127.0.0.1:63147'
 polling:
   interval: 5s
-  timeout: 2s
+  timeout: 5s
 filters:
   min_gas_price: 1gwei
+ 

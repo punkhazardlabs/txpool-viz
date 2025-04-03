@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"txpool-viz/config"
-	"txpool-viz/internal/broker"
+	// "txpool-viz/internal/broker"
 	"txpool-viz/internal/controller/handler"
 	route "txpool-viz/internal/controller/routes"
 	"txpool-viz/internal/service"
@@ -60,11 +60,15 @@ func (c *Controller) Serve() error {
 		}
 	}()
 
+	// Call one method
+	// Method Takes config and spins up a process for each endpoint
+	go transactions.Stream(ctx, c.Config, c.Services)
+
 	// Start polling transactions
-	go transactions.PollTransactions(ctx, c.Config, c.Services)
+	// go transactions.PollTransactions(ctx, c.Config, c.Services)
 
 	// Start processing transactions
-	go broker.ProcessTransactions(ctx, c.Config, c.Services)
+	// go broker.ProcessTransactions(ctx, c.Config, c.Services)
 
 	<-ctx.Done()
 	return nil
