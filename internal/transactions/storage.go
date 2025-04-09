@@ -6,21 +6,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 	"txpool-viz/pkg"
 
 	"github.com/redis/go-redis/v9"
-)
-
-const (
-	// Redis key prefixes
-	prefixTx        = "tx:"     // For storing transaction data
-	prefixIndex     = "idx:"    // For storing indexes
-	prefixGroup     = "group:"  // For storing grouped transactions
-	prefixStats     = "stats:"  // For storing statistics
-	prefixFilter    = "filter:" // For storing filter results
-	prefixMetadata  = "meta:"   // For storing transaction metadata
-	prefixAddresses = "addr:"   // For storing address-related data
 )
 
 // Storage handles all Redis operations for transactions
@@ -54,7 +42,7 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction, q
 	}
 
 	// Store metadata separately for efficient filtering
-	metaKey := fmt.Sprintf("%s%s:%d", prefixMetadata, tx.Metadata.From, tx.Metadata.Nonce)
+	metaKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
 	metaData, err := json.Marshal(tx.Metadata)
 	if err != nil {
 		return fmt.Errorf("error marshaling metadata: %w", err)
@@ -64,9 +52,7 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction, q
 	s.addToIndexes(ctx, tx, queue)
 
 	// Store metadata
-	if err := s.rdb.Set(ctx, metaKey, metaData, 24*time.Hour).Err(); err != nil {
-		return fmt.Errorf("error storing metadata: %w", err)
-	}
+	s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", queue), metaKey, metaData)
 
 	return nil
 }
@@ -74,32 +60,27 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction, q
 // addToIndexes adds the transaction to various indexes for efficient filtering
 func (s *Storage) addToIndexes(ctx context.Context, tx *StoredTransaction, queue string) {
 	pipe := s.rdb.Pipeline()
+	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
 
 	// Index by gas price
 	if tx.Metadata.GasPrice != nil {
-		pipe.ZAdd(ctx, fmt.Sprintf("%sgas_price:%s", prefixIndex, queue), redis.Z{
+		pipe.ZAdd(ctx, fmt.Sprintf("%s:gas", queue), redis.Z{
 			Score:  float64(tx.Metadata.GasPrice.Int64()),
-			Member: fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce),
+			Member: txKey,
 		})
 	}
 
 	// Index by nonce
-	pipe.ZAdd(ctx, fmt.Sprintf("%snonce:%s", prefixIndex, queue), redis.Z{
+	pipe.ZAdd(ctx, fmt.Sprintf("%s:nonce", queue), redis.Z{
 		Score:  float64(tx.Metadata.Nonce),
-		Member: fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce),
+		Member: txKey,
 	})
 
 	// Index by type
-	pipe.SAdd(ctx, fmt.Sprintf("%stype:%d:%s", prefixIndex, tx.Metadata.Type, queue),
-		fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
-
-	// Index by address
-	pipe.SAdd(ctx, fmt.Sprintf("%sfrom:%s:%s", prefixIndex, tx.Metadata.From, queue),
-		fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
-	if tx.Metadata.To != "" {
-		pipe.SAdd(ctx, fmt.Sprintf("%sto:%s:%s", prefixIndex, tx.Metadata.To, queue),
-			fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce))
-	}
+	pipe.ZAdd(ctx, fmt.Sprintf("%s:type", queue), redis.Z{
+		Score:  float64(tx.Metadata.Type),
+		Member: txKey,
+	})
 
 	_, err := pipe.Exec(ctx)
 
