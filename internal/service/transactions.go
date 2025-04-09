@@ -8,10 +8,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const (
-	pending = "pending"
-	queued  = "queued"
-)
+// const (
+// 	pending = "pending"
+// 	queued  = "queued"
+// )
 
 type transactionServiceImpl struct {
 	redis  *redis.Client
