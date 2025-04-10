@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"txpool-viz/config"
@@ -40,15 +38,9 @@ func NewController(cfg *config.Config, srvc *service.Service) *Controller {
 	}
 }
 
-func (c *Controller) Serve() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Graceful shutdown signal handler
-	go c.handleShutdown(cancel)
-
+func (c *Controller) Serve(ctx context.Context) error {
 	// Initialize services and configurations
-	if err := c.initialize(); err != nil {
+	if err := c.initialize(ctx); err != nil {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
@@ -74,22 +66,14 @@ func (c *Controller) Serve() error {
 	return nil
 }
 
-func (c *Controller) handleShutdown(cancel context.CancelFunc) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-	log.Println("Shutting down...")
-	cancel()
-}
-
-func (c *Controller) initialize() error {
+func (c *Controller) initialize(ctx context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	c.Config = cfg
 
-	srvc, err := c.setupServices()
+	srvc, err := service.NewService(cfg, ctx)
 	if err != nil {
 		return fmt.Errorf("failed to set up services: %w", err)
 	}
@@ -97,39 +81,8 @@ func (c *Controller) initialize() error {
 	return nil
 }
 
-func (c *Controller) setupServices() (*service.Service, error) {
-	// Initialize redis client
-	redisUrl := os.Getenv("REDIS_URL")
-	if redisUrl == "" {
-		return nil, errors.New("REDIS_URL environment variable is not set")
-	}
-
-	redisOptions, err := redis.ParseURL(redisUrl)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing REDIS_URL: %w", err)
-	}
-
-	redisClient := redis.NewClient(redisOptions)
-
-	// Initialize Postgres connection
-	conn := os.Getenv("POSTGRES_URL")
-	if conn == "" {
-		return nil, errors.New("POSTGRES_URL environment variable is not set")
-	}
-
-	// Initialize Logger
-	logger := pkg.NewLogger(nil)
-
-	return &service.Service{
-		Redis:  redisClient,
-		DB:     conn, // Assuming you connect to Postgres here
-		Logger: logger,
-	}, nil
-}
-
 func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l pkg.Logger) {
 	handler := handler.NewHandler(ctx, r, l)
-
 
 	route.RegisterRoutes(c.router, &handler)
 
