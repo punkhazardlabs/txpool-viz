@@ -28,8 +28,8 @@ func NewTransactionService(ctx context.Context, r *redis.Client, l pkg.Logger) *
 
 // GetLatestTransactions handles the request to get the latest transactions
 func (ts *transactionServiceImpl) GetLatestTransactions(ctx *gin.Context) {
-	// pendingTxs := ts.redis.HGetAll(ctx, pending)
-	// queuedTxs := ts.redis.HGetAll(ctx, queued)
+	// This needs to supply a list of recent transactions
 
+	// It will pull that from a queue
 	ts.logger.Info("REST API Exposed")
 }

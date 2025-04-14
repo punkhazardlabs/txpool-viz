@@ -10,37 +10,15 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/internal/model"
 	"txpool-viz/internal/service"
+	"txpool-viz/internal/storage"
 	"txpool-viz/pkg"
 
 	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
 )
-
-type RPCRequest struct {
-	Method  string   `json:"method"`
-	Params  []string `json:"params"`
-	Id      int      `json:"id"`
-	Jsonrpc string   `json:"jsonrpc"`
-}
-
-type RPCResponse struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
-	Result  Result `json:"result"`
-}
-
-type SubscriptionResponse struct {
-	Jsonrpc string             `json:"jsonrpc"`
-	Method  string             `json:"method"`
-	Params  SubscriptionParams `json:"params"`
-}
-
-type SubscriptionParams struct {
-	Subscrition string `json:"subscription"`
-	TxHash      string `json:"result"`
-}
 
 type Result struct {
 	Pending map[string]map[string]*types.Transaction `json:"pending"`
@@ -53,11 +31,11 @@ func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service) {
 
 	// Start the streaming txhashes
 	for _, endpoint := range cfg.Endpoints {
-		go streamEndpoint(ctx, endpoint, srvc.Logger, *srvc.Redis)
+		go streamEndpoint(ctx, endpoint, srvc.Logger, srvc.Redis)
 	}
 }
 
-func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger, r redis.Client) {
+func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger, r *redis.Client) {
 	conn, resp, err := websocket.Dial(ctx, endpoint.Websocket, nil)
 
 	if err != nil {
@@ -69,7 +47,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 
 	defer conn.Close(websocket.StatusNormalClosure, "Closing connection")
 
-	payload := &RPCRequest{
+	payload := &model.RPCRequest{
 		Method:  "eth_subscribe",
 		Params:  []string{"newPendingTransactions"},
 		Id:      1,
@@ -88,7 +66,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 		l.Info(fmt.Sprintf("Failed to read response from socket: %s", endpoint.Name))
 	}
 
-	var response SubscriptionResponse
+	var response model.SubscriptionResponse
 	if err = json.Unmarshal(msg, &response); err != nil {
 		l.Error(fmt.Sprintf("Response Error: %s", err))
 	}
@@ -97,19 +75,47 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 	l.Info("Websocket connected", pkg.Fields{"endpoint": endpoint.Name})
 
 	for {
+		time := time.Now().Unix()
+
 		_, msg, err := conn.Read(context.Background())
 
 		if err != nil {
 			l.Error("Error reading stream", pkg.Fields{"endpoint": endpoint.Name})
 		}
 
-		var event SubscriptionResponse
+		var event model.SubscriptionResponse
 
 		err = json.Unmarshal(msg, &event)
 		if err != nil {
 			l.Error("JSON parse error")
 			continue
 		}
+
+		txHash := event.Params.TxHash
+
+		// Add to universal queue if it does not exist
+		r.ZAddNX(ctx, "universal", redis.Z{
+			Score:  float64(time),
+			Member: txHash,
+		})
+
+		// Create the tx Stored Transaction entry and add to the client queue
+		storedTx := &model.StoredTransaction{
+			Hash: txHash,
+			Metadata: model.TransactionMetadata{
+				Status:       model.StatusReceived,
+				TimeReceived: time,
+			},
+		}
+
+		storage := storage.NewStorage(r, l)
+		err = storage.StoreTransaction(ctx, storedTx, endpoint.Name)
+
+		if err != nil {
+			l.Error("Error storing tx to cache", pkg.Fields{
+				"txHash": txHash,
+			})
+		} 
 
 		// Queue the TX
 		r.RPush(context.Background(), fmt.Sprintf("stream:%s", endpoint.Name), fmt.Sprintf("%s:%s", endpoint.Name, event.Params.TxHash))
@@ -118,7 +124,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 
 // PollTransactions polls transactions from endpoints at regular intervals
 func PollTransactions(ctx context.Context, cfg *config.Config, srvc *service.Service) {
-	storage := NewStorage(srvc.Redis, srvc.Logger)
+	storage := storage.NewStorage(srvc.Redis, srvc.Logger)
 
 	for _, endpoint := range cfg.Endpoints {
 		go func(endpoint config.Endpoint) {
@@ -142,10 +148,10 @@ func PollTransactions(ctx context.Context, cfg *config.Config, srvc *service.Ser
 	}
 }
 
-func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *Storage, l pkg.Logger) {
+func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *storage.Storage, l pkg.Logger) {
 	l.Info("Polling transactions", pkg.Fields{"endpoint": endpoint.Name})
 
-	payload := &RPCRequest{
+	payload := &model.RPCRequest{
 		Method:  "txpool_content",
 		Params:  []string{},
 		Id:      1,
@@ -185,7 +191,7 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *Sto
 		return
 	}
 
-	var rpcResponse RPCResponse
+	var rpcResponse model.RPCResponse
 	if err = json.Unmarshal(responseData, &rpcResponse); err != nil {
 		l.Error("Error unmarshalling response data", pkg.Fields{"error": err})
 		return
@@ -200,11 +206,11 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *Sto
 }
 
 // processTransactionBatch processes a batch of transactions and stores them
-func processTransactionBatch(ctx context.Context, storage *Storage, listName string, transactions map[string]map[string]*types.Transaction) {
+func processTransactionBatch(ctx context.Context, storage *storage.Storage, listName string, transactions map[string]map[string]*types.Transaction) {
 	for address, txs := range transactions {
 		for nonce, tx := range txs {
 			// Create metadata for the transaction
-			metadata := TransactionMetadata{
+			metadata := model.TransactionMetadata{
 				Nonce:      tx.Nonce(),
 				From:       address,
 				IsContract: false, // This would need to be determined by checking the contract code
@@ -221,18 +227,18 @@ func processTransactionBatch(ctx context.Context, storage *Storage, listName str
 			// Set transaction type and gas-related fields
 			switch tx.Type() {
 			case types.BlobTxType:
-				metadata.Type = BlobTx
+				metadata.Type = model.BlobTx
 				// Note: We can't access MaxFeePerBlobGas directly as it's not exposed in the interface
 			case types.DynamicFeeTxType:
-				metadata.Type = EIP1559Tx
+				metadata.Type = model.EIP1559Tx
 				// Note: We can't access MaxFeePerGas and MaxPriorityFee directly as they're not exposed in the interface
 			default:
-				metadata.Type = LegacyTx
+				metadata.Type = model.LegacyTx
 				metadata.GasPrice = tx.GasPrice()
 			}
 
 			// Create stored transaction
-			storedTx := &StoredTransaction{
+			storedTx := &model.StoredTransaction{
 				Hash:     tx.Hash().Hex(),
 				Metadata: metadata,
 			}

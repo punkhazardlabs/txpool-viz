@@ -8,10 +8,10 @@ import (
 
 	"txpool-viz/config"
 	"txpool-viz/internal/service"
+	"txpool-viz/internal/storage"
 	"txpool-viz/pkg"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,24 +27,11 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	storage := NewStorage(srvc.Redis, srvc.Logger)
+	storage := storage.NewStorage(srvc.Redis, srvc.Logger)
 	queue := fmt.Sprintf("stream:%s", endpoint.Name)
 
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				count, err := srvc.Redis.LLen(ctx, queue).Result()
-				if err != nil {
-					srvc.Logger.Error(fmt.Sprintf("Error getting queue length: %s", err))
-					continue
-				}
-				srvc.Logger.Info(fmt.Sprintf("Current queue size: %d", count))
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	// Launch queue monitor
+	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue, interval)
 
 	for {
 		select {
@@ -74,66 +61,41 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	}
 }
 
-func processTransactions(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *Storage) {
+func processTransactions(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.Storage) {
 	// Pull the TX receipts
 	tx, _, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
+
+	// @ndeto @TODO If not pending, queue it up to keep polling
+	// if !isPending {}
 
 	if err != nil {
 		srvc.Logger.Error(fmt.Sprintf("Error getting TX details. Err: %s", err))
 	}
 
-	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+	time := time.Now().Unix()
+
+	err = storage.UpdateTransaction(ctx, tx, endpoint.Name, time)
 
 	if err != nil {
-		srvc.Logger.Error("Invalid Signature: %s", err)
-	}
-
-	// Create new stored transaction
-	storedTx := &StoredTransaction{
-		Hash: tx.Hash().String(),
-		Metadata: TransactionMetadata{
-			Status:       StatusQueued,
-			TimeReceived: time.Now().Unix(),
-			Type:         getTransactionType(tx),
-			Nonce:        tx.Nonce(),
-			From:         sender.Hex(),
-			To:           tx.To().Hex(),
-			Timestamp:    time.Now().Unix(),
-		},
-	}
-
-	// Set gas price based on transaction type
-	switch tx.Type() {
-	case types.DynamicFeeTxType:
-		storedTx.Metadata.MaxFeePerGas = tx.GasFeeCap()
-		storedTx.Metadata.MaxPriorityFee = tx.GasTipCap()
-	case types.BlobTxType:
-		storedTx.Metadata.MaxFeePerGas = tx.GasFeeCap()
-		storedTx.Metadata.MaxPriorityFee = tx.GasTipCap()
-		storedTx.Metadata.MaxFeePerBlobGas = tx.BlobGasFeeCap()
-	default:
-		storedTx.Metadata.GasPrice = tx.GasPrice()
-	}
-
-	// Store to Redis
-	err = storage.StoreTransaction(ctx, storedTx, endpoint.Name)
-
-	if err == redis.Nil {
-	} else if err != nil {
-		srvc.Logger.Error("Error storing tx to cache", pkg.Fields{"txHash": tx.Hash(), "error": err.Error()})
+		srvc.Logger.Error("Error Updating TX", pkg.Fields{"txHash": txHash, "tx": tx})
 	}
 }
 
-// getTransactionType determines the type of transaction
-func getTransactionType(tx *types.Transaction) TransactionType {
-	switch {
-	case tx.Type() == types.BlobTxType:
-		return BlobTx
-	case tx.Type() == types.DynamicFeeTxType:
-		return EIP1559Tx
-	case tx.Type() == types.AccessListTxType:
-		return EIP2930Tx
-	default:
-		return LegacyTx
+func monitorQueueSize(ctx context.Context, redis *redis.Client, logger pkg.Logger, queue string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			count, err := redis.LLen(ctx, queue).Result()
+			if err != nil {
+				logger.Error(fmt.Sprintf("Error getting queue length: %s", err))
+				continue
+			}
+			logger.Info(fmt.Sprintf("Current queue size: %d", count))
+		case <-ctx.Done():
+			return
+		}
 	}
 }

@@ -1,4 +1,4 @@
-package transactions
+package model
 
 import (
 	"math/big"
@@ -19,8 +19,9 @@ const (
 type TransactionStatus int
 
 const (
-	StatusQueued TransactionStatus = iota
+	StatusReceived TransactionStatus = iota
 	StatusPending
+	StatusQueued
 	StatusMined
 	StatusDropped
 )
@@ -40,6 +41,7 @@ type TransactionMetadata struct {
 	Status           TransactionStatus `json:"status"`
 	TimeReceived     int64             `json:"time_received"` // When first seen in mempool
 	TimePending      int64             `json:"time_pending"`  // When moved to pending
+	TimeQueued       int64             `json:"time_queued"`   // When Queued
 	TimeMined        int64             `json:"time_mined"`    // When mined
 	TimeDropped      int64             `json:"time_dropped"`  // When dropped
 	BlockNumber      uint64            `json:"block_number"`  // If mined

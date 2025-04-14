@@ -1,4 +1,4 @@
-package transactions
+package storage
 
 import (
 	"context"
@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"txpool-viz/internal/model"
 	"txpool-viz/pkg"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -26,7 +28,7 @@ func NewStorage(rdb *redis.Client, l pkg.Logger) *Storage {
 }
 
 // StoreTransaction stores a transaction with its metadata in the specified queue
-func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction, queue string) error {
+func (s *Storage) StoreTransaction(ctx context.Context, tx *model.StoredTransaction, queue string) error {
 	// Create the transaction key
 	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
 
@@ -57,8 +59,36 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *StoredTransaction, q
 	return nil
 }
 
+// Update StoredTransaction with Receipt Details
+func (s *Storage) UpdateTransaction(ctx context.Context, tx *types.Transaction, queue string, time int64) error {
+	// Recover sender from signature
+	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+
+	if err != nil {
+		return fmt.Errorf("Invalid Signature: %s", err)
+	}
+
+	// Get redis tx
+	metaKey := fmt.Sprintf("%s:%d", sender, tx.Nonce())
+
+	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", metaKey), map[string]any{
+		"status":       model.StatusPending,
+		"type":         pkg.GetTransactionType(tx),
+		"nonce":        tx.Nonce(),
+		"from":         sender,
+		"to":           tx.To(),
+		"time_pending": time, // @ndeto @TODO NOT SURE IF THIS IS THE BEST PLACE
+	}).Err()
+
+	if err != nil {
+		return fmt.Errorf("Error Updating Transaction Error: %s", err)
+	}
+
+	return nil
+}
+
 // addToIndexes adds the transaction to various indexes for efficient filtering
-func (s *Storage) addToIndexes(ctx context.Context, tx *StoredTransaction, queue string) {
+func (s *Storage) addToIndexes(ctx context.Context, tx *model.StoredTransaction, queue string) {
 	pipe := s.rdb.Pipeline()
 	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
 
@@ -90,16 +120,16 @@ func (s *Storage) addToIndexes(ctx context.Context, tx *StoredTransaction, queue
 }
 
 // FilterTransactions retrieves transactions based on filter criteria from a specific queue
-func (s *Storage) FilterTransactions(ctx context.Context, queue string, criteria FilterCriteria) ([]StoredTransaction, error) {
+func (s *Storage) FilterTransactions(ctx context.Context, queue string, criteria model.FilterCriteria) ([]model.StoredTransaction, error) {
 	// Get all transactions from the queue
 	txMap, err := s.rdb.HGetAll(ctx, queue).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error getting transactions from queue %s: %w", queue, err)
 	}
 
-	var results []StoredTransaction
+	var results []model.StoredTransaction
 	for _, txData := range txMap {
-		var tx StoredTransaction
+		var tx model.StoredTransaction
 		if err := json.Unmarshal([]byte(txData), &tx); err != nil {
 			continue
 		}
@@ -114,7 +144,7 @@ func (s *Storage) FilterTransactions(ctx context.Context, queue string, criteria
 }
 
 // matchesFilter checks if a transaction matches the filter criteria
-func (s *Storage) matchesFilter(tx StoredTransaction, criteria FilterCriteria) bool {
+func (s *Storage) matchesFilter(tx model.StoredTransaction, criteria model.FilterCriteria) bool {
 	// Check gas price range
 	if criteria.GasPriceRange.Min != nil {
 		if tx.Metadata.GasPrice != nil && tx.Metadata.GasPrice.Cmp(criteria.GasPriceRange.Min) < 0 {
@@ -178,18 +208,18 @@ func (s *Storage) matchesFilter(tx StoredTransaction, criteria FilterCriteria) b
 }
 
 // GroupTransactions groups transactions based on grouping criteria from a specific queue
-func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria GroupingCriteria) (*GroupedTransactions, error) {
+func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria model.GroupingCriteria) (*model.GroupedTransactions, error) {
 	// Get all transactions from the queue
 	txMap, err := s.rdb.HGetAll(ctx, queue).Result()
 	if err != nil {
 		return nil, fmt.Errorf("error getting transactions from queue %s: %w", queue, err)
 	}
 
-	groups := make(map[string][]StoredTransaction)
+	groups := make(map[string][]model.StoredTransaction)
 	var totalTxs int64
 
 	for _, txData := range txMap {
-		var tx StoredTransaction
+		var tx model.StoredTransaction
 		if err := json.Unmarshal([]byte(txData), &tx); err != nil {
 			continue
 		}
@@ -199,7 +229,7 @@ func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria 
 		totalTxs++
 	}
 
-	return &GroupedTransactions{
+	return &model.GroupedTransactions{
 		Groups: groups,
 		Stats: struct {
 			TotalTransactions int64 `json:"total_transactions"`
@@ -212,7 +242,7 @@ func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria 
 }
 
 // getGroupKey generates a key for grouping transactions
-func (s *Storage) getGroupKey(tx StoredTransaction, criteria GroupingCriteria) string {
+func (s *Storage) getGroupKey(tx model.StoredTransaction, criteria model.GroupingCriteria) string {
 	var parts []string
 
 	if criteria.GroupByGasPrice {
