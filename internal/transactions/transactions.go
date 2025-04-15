@@ -104,7 +104,6 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 			Hash: txHash,
 			Metadata: model.TransactionMetadata{
 				Status:       model.StatusReceived,
-				TimeReceived: time,
 			},
 		}
 

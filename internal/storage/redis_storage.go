@@ -9,6 +9,7 @@ import (
 	"txpool-viz/internal/model"
 	"txpool-viz/pkg"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
 )
@@ -54,34 +55,105 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *model.StoredTransact
 	s.addToIndexes(ctx, tx, queue)
 
 	// Store metadata
-	s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", queue), metaKey, metaData)
+	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", queue), metaKey, metaData).Err()
+
+	if err != nil {
+		return fmt.Errorf("error updating metadata: %s", err)
+	}
 
 	return nil
 }
 
 // Update StoredTransaction with Receipt Details
-func (s *Storage) UpdateTransaction(ctx context.Context, tx *types.Transaction, queue string, time int64) error {
+func (s *Storage) UpdateTransaction(ctx context.Context, tx *types.Transaction, queue string, status model.TransactionStatus, time int64) error {
 	// Recover sender from signature
 	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-
 	if err != nil {
-		return fmt.Errorf("Invalid Signature: %s", err)
+		return fmt.Errorf("failed to recover transaction sender: %w", err)
 	}
 
-	// Get redis tx
-	metaKey := fmt.Sprintf("%s:%d", sender, tx.Nonce())
+	txKey := pkg.GetTxKey(tx, sender)
 
-	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", metaKey), map[string]any{
-		"status":       model.StatusPending,
-		"type":         pkg.GetTransactionType(tx),
-		"nonce":        tx.Nonce(),
-		"from":         sender,
-		"to":           tx.To(),
-		"time_pending": time, // @ndeto @TODO NOT SURE IF THIS IS THE BEST PLACE
-	}).Err()
-
+	// Step 1: Get existing metadata
+	val, err := s.rdb.HGet(ctx, fmt.Sprintf("meta:%s", queue), txKey).Result()
 	if err != nil {
-		return fmt.Errorf("Error Updating Transaction Error: %s", err)
+		return fmt.Errorf("failed to get transaction metadata from queue %s: %w", queue, err)
+	}
+
+	// Step 2: Unmarshal
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(val), &meta); err != nil {
+		return fmt.Errorf("failed to unmarshal transaction metadata: %w", err)
+	}
+
+	// Step 3: Update based on status
+	switch status {
+	case model.StatusQueued:
+		err = s.updateTransactionQueued(ctx, tx, queue, txKey, meta, sender, time)
+	case model.StatusPending:
+		err = s.updateTransactionPending(ctx, tx, queue, txKey, meta, sender, time)
+	case model.StatusDropped:
+		err = s.updateTransactionDropped(ctx, queue, txKey, meta, time)
+	case model.StatusMined:
+		err = s.updateTransactionMined(ctx, queue, txKey, meta, time)
+	default:
+		return fmt.Errorf("unknown status: %v", status)
+	}
+
+	return err
+}
+
+func (s *Storage) updateTransactionPending(ctx context.Context, tx *types.Transaction, queue, txKey string, meta map[string]any, sender common.Address, time int64) error {
+	meta["status"] = model.StatusPending
+	meta["type"] = pkg.GetTransactionType(tx)
+	meta["nonce"] = tx.Nonce()
+	meta["from"] = sender.Hex()
+	if tx.To() != nil {
+		meta["to"] = tx.To().Hex()
+	}
+	meta["time_pending"] = time
+	meta["time_received"] = tx.Time()
+
+	return s.saveMetadata(ctx, queue, txKey, meta)
+}
+
+func (s *Storage) updateTransactionMined(ctx context.Context, queue, txKey string, meta map[string]any, time int64) error {
+	meta["status"] = model.StatusMined
+	meta["time_mined"] = time
+
+	return s.saveMetadata(ctx, queue, txKey, meta)
+}
+
+func (s *Storage) updateTransactionDropped(ctx context.Context, queue, txKey string, meta map[string]any, time int64) error {
+	meta["status"] = model.StatusDropped
+	meta["time_failed"] = time
+
+	return s.saveMetadata(ctx, queue, txKey, meta)
+}
+
+func (s *Storage) updateTransactionQueued(ctx context.Context, tx *types.Transaction, queue, txKey string, meta map[string]any, sender common.Address, time int64) error {
+	meta["status"] = model.StatusQueued
+	meta["type"] = pkg.GetTransactionType(tx)
+	meta["nonce"] = tx.Nonce()
+	meta["from"] = sender.Hex()
+	if tx.To() != nil {
+		meta["to"] = tx.To().Hex()
+	}
+	meta["time_queued"] = time
+	meta["time_received"] = tx.Time()
+
+	return s.saveMetadata(ctx, queue, txKey, meta)
+}
+
+func (s *Storage) saveMetadata(ctx context.Context, queue, txKey string, meta map[string]any) error {
+	updated, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("error marshaling metadata: %w", err)
+	}
+
+	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", queue), txKey, updated).Err()
+	if err == redis.Nil {} else if err != nil {
+		return fmt.Errorf("error saving metadata: %w", err)
 	}
 
 	return nil

@@ -1,8 +1,10 @@
 package pkg
 
 import (
+	"fmt"
 	"txpool-viz/internal/model"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -18,4 +20,9 @@ func GetTransactionType(tx *types.Transaction) model.TransactionType {
 	default:
 		return model.LegacyTx
 	}
+}
+
+func GetTxKey(tx *types.Transaction, addr common.Address) string {
+	txKey := fmt.Sprintf("%s:%d", addr, tx.Nonce())
+	return txKey
 }

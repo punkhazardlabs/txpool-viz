@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/internal/model"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/storage"
 	"txpool-viz/pkg"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/redis/go-redis/v9"
 )
@@ -38,6 +40,9 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 		case <-ctx.Done():
 			return
 		default:
+			//Capture timestamp at the top level
+			currentTime := time.Now().Unix()
+
 			txString, err := srvc.Redis.LPop(ctx, queue).Result()
 			if err == redis.Nil {
 				time.Sleep(interval)
@@ -54,30 +59,64 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 				continue
 			}
 
-			processTransactions(ctx, tx[1], endpoint, srvc, storage)
+			processTransactions(ctx, tx[1], endpoint, srvc, storage, currentTime)
 
 			srvc.Logger.Info(fmt.Sprintf("Processed. Client: %s, TxHash: %s", tx[0], tx[1]))
 		}
 	}
 }
 
-func processTransactions(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.Storage) {
+func processTransactions(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.Storage, time int64) {
 	// Pull the TX receipts
-	tx, _, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
+	tx, isPending, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
 
-	// @ndeto @TODO If not pending, queue it up to keep polling
-	// if !isPending {}
-
-	if err != nil {
-		srvc.Logger.Error(fmt.Sprintf("Error getting TX details. Err: %s", err))
+	// Handle transaction not found
+	if err == ethereum.NotFound {
+		if err := storage.UpdateTransaction(ctx, tx, endpoint.Name, model.StatusDropped, time); err != nil {
+			srvc.Logger.Error("Error updating dropped transaction", pkg.Fields{
+				"txHash": txHash,
+				"error":  err.Error(),
+			})
+		}
+		return
 	}
 
-	time := time.Now().Unix()
-
-	err = storage.UpdateTransaction(ctx, tx, endpoint.Name, time)
-
+	// Handle other fetch errors
 	if err != nil {
-		srvc.Logger.Error("Error Updating TX", pkg.Fields{"txHash": txHash, "tx": tx})
+		srvc.Logger.Error("Error fetching transaction", pkg.Fields{
+			"txHash": txHash,
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	// Handle queued transactions
+	if !isPending {
+		if err := storage.UpdateTransaction(ctx, tx, endpoint.Name, model.StatusQueued, time); err != nil {
+			srvc.Logger.Error("Error updating queued transaction", pkg.Fields{
+				"txHash": txHash,
+				"error":  err.Error(),
+			})
+			return
+		}
+		// Requeue for further processing
+		if err := srvc.Redis.RPush(ctx, fmt.Sprintf("stream:%s", endpoint.Name), 
+			fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
+			srvc.Logger.Error("Error requeueing transaction", pkg.Fields{
+				"txHash": txHash,
+				"error":  err.Error(),
+			})
+		}
+		return
+	}
+
+	// Handle pending transactions
+	if err := storage.UpdateTransaction(ctx, tx, endpoint.Name, model.StatusPending, time); err != nil {
+		srvc.Logger.Error("Error updating pending transaction", pkg.Fields{
+			"txHash": txHash,
+			"error":  err.Error(),
+		})
+		return
 	}
 }
 
