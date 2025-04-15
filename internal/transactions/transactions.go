@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/storage"
-	"txpool-viz/pkg"
+	"txpool-viz/utils"
 
 	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -35,11 +36,11 @@ func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service) {
 	}
 }
 
-func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger, r *redis.Client) {
+func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l logger.Logger, r *redis.Client) {
 	conn, resp, err := websocket.Dial(ctx, endpoint.Websocket, nil)
 
 	if err != nil {
-		l.Error(fmt.Sprintf("Error connecting to websocket. Error: %s", err), pkg.Fields{"endpoint": endpoint.Name})
+		l.Error(fmt.Sprintf("Error connecting to websocket. Error: %s", err), logger.Fields{"endpoint": endpoint.Name})
 		return
 	}
 
@@ -71,8 +72,10 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 		l.Error(fmt.Sprintf("Response Error: %s", err))
 	}
 
-	l.Debug(fmt.Sprintf("Subscription ID for endpoint: %s", msg), pkg.Fields{"endpoint": endpoint.Name})
-	l.Info("Websocket connected", pkg.Fields{"endpoint": endpoint.Name})
+	l.Debug(fmt.Sprintf("Subscription ID for endpoint: %s", msg), logger.Fields{"endpoint": endpoint.Name})
+	l.Info("Websocket connected", logger.Fields{"endpoint": endpoint.Name})
+
+	redisUniversalSortedSetKey := utils.RedisUniversalKey()
 
 	for {
 		time := time.Now().Unix()
@@ -80,7 +83,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 		_, msg, err := conn.Read(context.Background())
 
 		if err != nil {
-			l.Error("Error reading stream", pkg.Fields{"endpoint": endpoint.Name})
+			l.Error("Error reading stream", logger.Fields{"endpoint": endpoint.Name})
 		}
 
 		var event model.SubscriptionResponse
@@ -94,7 +97,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 		txHash := event.Params.TxHash
 
 		// Add to universal queue if it does not exist
-		r.ZAddNX(ctx, "universal", redis.Z{
+		r.ZAddNX(ctx, redisUniversalSortedSetKey, redis.Z{
 			Score:  float64(time),
 			Member: txHash,
 		})
@@ -103,52 +106,28 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l pkg.Logger,
 		storedTx := &model.StoredTransaction{
 			Hash: txHash,
 			Metadata: model.TransactionMetadata{
-				Status:       model.StatusReceived,
+				Status: model.StatusReceived,
 			},
 		}
 
-		storage := storage.NewStorage(r, l)
-		err = storage.StoreTransaction(ctx, storedTx, endpoint.Name)
+		storage := storage.NewClientStorage(endpoint.Name, r, l)
+		err = storage.StoreTransaction(ctx, storedTx)
 
 		if err != nil {
-			l.Error("Error storing tx to cache", pkg.Fields{
+			l.Error("Error storing tx to cache", logger.Fields{
 				"txHash": txHash,
 			})
-		} 
+		}
 
 		// Queue the TX
-		r.RPush(context.Background(), fmt.Sprintf("stream:%s", endpoint.Name), fmt.Sprintf("%s:%s", endpoint.Name, event.Params.TxHash))
+		streamKey := utils.RedisStreamKey(endpoint.Name)
+		r.RPush(context.Background(), streamKey, fmt.Sprintf("%s:%s", endpoint.Name, event.Params.TxHash))
 	}
 }
 
-// PollTransactions polls transactions from endpoints at regular intervals
-func PollTransactions(ctx context.Context, cfg *config.Config, srvc *service.Service) {
-	storage := storage.NewStorage(srvc.Redis, srvc.Logger)
-
-	for _, endpoint := range cfg.Endpoints {
-		go func(endpoint config.Endpoint) {
-			ticker := time.NewTicker(cfg.Polling["interval"])
-			defer ticker.Stop()
-
-			srvc.Logger.Info("Polling started for:", endpoint.Name)
-
-			for {
-				select {
-				case <-ctx.Done():
-					srvc.Logger.Info("Shutting down PollTransactions for", endpoint.Name)
-					return
-				case <-ticker.C:
-					pollCtx, cancel := context.WithTimeout(ctx, cfg.Polling["timeout"])
-					getTransactions(pollCtx, endpoint, storage, srvc.Logger)
-					cancel()
-				}
-			}
-		}(endpoint)
-	}
-}
-
-func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *storage.Storage, l pkg.Logger) {
-	l.Info("Polling transactions", pkg.Fields{"endpoint": endpoint.Name})
+// Used to continously poll txpool_content from an RPC url
+func GetTransactions(ctx context.Context, endpoint config.Endpoint, storage *storage.ClientStorage, l logger.Logger) {
+	l.Info("Polling transactions", logger.Fields{"endpoint": endpoint.Name})
 
 	payload := &model.RPCRequest{
 		Method:  "txpool_content",
@@ -159,13 +138,13 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *sto
 
 	requestData, err := json.Marshal(payload)
 	if err != nil {
-		l.Error("Error marshalling request data", pkg.Fields{"error": err})
+		l.Error("Error marshalling request data", logger.Fields{"error": err})
 		return
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.RPCUrl, bytes.NewBuffer(requestData))
 	if err != nil {
-		l.Error("Error creating request", pkg.Fields{"error": err})
+		l.Error("Error creating request", logger.Fields{"error": err})
 		return
 	}
 
@@ -175,10 +154,10 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *sto
 	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			l.Error("Request cancelled", pkg.Fields{"endpoint": endpoint.Name, "error": ctx.Err()})
+			l.Error("Request cancelled", logger.Fields{"endpoint": endpoint.Name, "error": ctx.Err()})
 			return
 		}
-		l.Error("Error sending request", pkg.Fields{"error": err})
+		l.Error("Error sending request", logger.Fields{"error": err})
 		return
 	}
 
@@ -186,13 +165,13 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *sto
 
 	responseData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		l.Error("Error reading response", pkg.Fields{"error": err})
+		l.Error("Error reading response", logger.Fields{"error": err})
 		return
 	}
 
 	var rpcResponse model.RPCResponse
 	if err = json.Unmarshal(responseData, &rpcResponse); err != nil {
-		l.Error("Error unmarshalling response data", pkg.Fields{"error": err})
+		l.Error("Error unmarshalling response data", logger.Fields{"error": err})
 		return
 	}
 
@@ -201,11 +180,11 @@ func getTransactions(ctx context.Context, endpoint config.Endpoint, storage *sto
 
 	l.Info(fmt.Sprintf("Processed %d pending txs, %d queued txs",
 		len(rpcResponse.Result.Pending), len(rpcResponse.Result.Queued)),
-		pkg.Fields{"endpoint": endpoint.Name})
+		logger.Fields{"endpoint": endpoint.Name})
 }
 
 // processTransactionBatch processes a batch of transactions and stores them
-func processTransactionBatch(ctx context.Context, storage *storage.Storage, listName string, transactions map[string]map[string]*types.Transaction) {
+func processTransactionBatch(ctx context.Context, storage *storage.ClientStorage, listName string, transactions map[string]map[string]*types.Transaction) {
 	for address, txs := range transactions {
 		for nonce, tx := range txs {
 			// Create metadata for the transaction
@@ -243,7 +222,7 @@ func processTransactionBatch(ctx context.Context, storage *storage.Storage, list
 			}
 
 			// Store the transaction in the appropriate queue
-			if err := storage.StoreTransaction(ctx, storedTx, listName); err != nil {
+			if err := storage.StoreTransaction(ctx, storedTx); err != nil {
 				fmt.Printf("Error storing TX (address: %s, nonce: %s): %v\n", address, nonce, err)
 			}
 		}

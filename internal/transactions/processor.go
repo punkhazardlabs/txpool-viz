@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"txpool-viz/config"
+	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/storage"
-	"txpool-viz/pkg"
+	"txpool-viz/utils"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -29,8 +30,8 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	storage := storage.NewStorage(srvc.Redis, srvc.Logger)
-	queue := fmt.Sprintf("stream:%s", endpoint.Name)
+	storage := storage.NewClientStorage(endpoint.Name, srvc.Redis, srvc.Logger)
+	queue := utils.RedisStreamKey(endpoint.Name)
 
 	// Launch queue monitor
 	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue, interval)
@@ -49,7 +50,7 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 				continue
 			} else if err != nil {
 				time.Sleep(interval)
-				srvc.Logger.Error(fmt.Sprintf("Error reading queued txs: %s", err), pkg.Fields{"queue": queue})
+				srvc.Logger.Error(fmt.Sprintf("Error reading queued txs: %s", err), logger.Fields{"queue": queue})
 				continue
 			}
 
@@ -59,21 +60,21 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 				continue
 			}
 
-			processTransactions(ctx, tx[1], endpoint, srvc, storage, currentTime)
+			processTransaction(ctx, tx[1], endpoint, srvc, storage, currentTime)
 
 			srvc.Logger.Info(fmt.Sprintf("Processed. Client: %s, TxHash: %s", tx[0], tx[1]))
 		}
 	}
 }
 
-func processTransactions(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.Storage, time int64) {
+func processTransaction(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.ClientStorage, time int64) {
 	// Pull the TX receipts
 	tx, isPending, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
 
 	// Handle transaction not found
 	if err == ethereum.NotFound {
 		if err := storage.UpdateTransaction(ctx, tx, endpoint.Name, model.StatusDropped, time); err != nil {
-			srvc.Logger.Error("Error updating dropped transaction", pkg.Fields{
+			srvc.Logger.Error("Error updating dropped transaction", logger.Fields{
 				"txHash": txHash,
 				"error":  err.Error(),
 			})
@@ -83,7 +84,7 @@ func processTransactions(ctx context.Context, txHash string, endpoint *config.En
 
 	// Handle other fetch errors
 	if err != nil {
-		srvc.Logger.Error("Error fetching transaction", pkg.Fields{
+		srvc.Logger.Error("Error fetching transaction", logger.Fields{
 			"txHash": txHash,
 			"error":  err.Error(),
 		})
@@ -93,16 +94,16 @@ func processTransactions(ctx context.Context, txHash string, endpoint *config.En
 	// Handle queued transactions
 	if !isPending {
 		if err := storage.UpdateTransaction(ctx, tx, endpoint.Name, model.StatusQueued, time); err != nil {
-			srvc.Logger.Error("Error updating queued transaction", pkg.Fields{
+			srvc.Logger.Error("Error updating queued transaction", logger.Fields{
 				"txHash": txHash,
 				"error":  err.Error(),
 			})
 			return
 		}
 		// Requeue for further processing
-		if err := srvc.Redis.RPush(ctx, fmt.Sprintf("stream:%s", endpoint.Name), 
+		if err := srvc.Redis.RPush(ctx, fmt.Sprintf("stream:%s", endpoint.Name),
 			fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
-			srvc.Logger.Error("Error requeueing transaction", pkg.Fields{
+			srvc.Logger.Error("Error requeueing transaction", logger.Fields{
 				"txHash": txHash,
 				"error":  err.Error(),
 			})
@@ -112,7 +113,7 @@ func processTransactions(ctx context.Context, txHash string, endpoint *config.En
 
 	// Handle pending transactions
 	if err := storage.UpdateTransaction(ctx, tx, endpoint.Name, model.StatusPending, time); err != nil {
-		srvc.Logger.Error("Error updating pending transaction", pkg.Fields{
+		srvc.Logger.Error("Error updating pending transaction", logger.Fields{
 			"txHash": txHash,
 			"error":  err.Error(),
 		})
@@ -120,7 +121,7 @@ func processTransactions(ctx context.Context, txHash string, endpoint *config.En
 	}
 }
 
-func monitorQueueSize(ctx context.Context, redis *redis.Client, logger pkg.Logger, queue string, interval time.Duration) {
+func monitorQueueSize(ctx context.Context, redis *redis.Client, logger logger.Logger, queue string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 

@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
-	"txpool-viz/pkg"
+	"txpool-viz/utils"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -15,21 +16,29 @@ import (
 )
 
 // Storage handles all Redis operations for transactions
-type Storage struct {
+type ClientStorage struct {
 	rdb    *redis.Client
-	logger pkg.Logger
+	logger logger.Logger
+	client string
+
+	// Redis key references
+	MetaKey string
+	TxKey   string
 }
 
 // NewStorage creates a new storage instance
-func NewStorage(rdb *redis.Client, l pkg.Logger) *Storage {
-	return &Storage{
-		rdb:    rdb,
-		logger: l,
+func NewClientStorage(client string, rdb *redis.Client, l logger.Logger) *ClientStorage {
+	return &ClientStorage{
+		rdb:     rdb,
+		logger:  l,
+		client:  client,
+		MetaKey: utils.RedisClientMetaKey(client),
+		TxKey:   utils.RedisClientTxKey(client),
 	}
 }
 
 // StoreTransaction stores a transaction with its metadata in the specified queue
-func (s *Storage) StoreTransaction(ctx context.Context, tx *model.StoredTransaction, queue string) error {
+func (s *ClientStorage) StoreTransaction(ctx context.Context, tx *model.StoredTransaction) error {
 	// Create the transaction key
 	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
 
@@ -40,22 +49,22 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *model.StoredTransact
 	}
 
 	// Store in Redis queue hash
-	if err := s.rdb.HSet(ctx, queue, txKey, txData).Err(); err != nil {
-		return fmt.Errorf("error storing transaction in queue %s: %w", queue, err)
+	if err := s.rdb.HSet(ctx, s.TxKey, txKey, txData).Err(); err != nil {
+		return fmt.Errorf("error storing transaction in queue %s: %w", s.TxKey, err)
 	}
 
 	// Store metadata separately for efficient filtering
-	metaKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
+	txKey = fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
 	metaData, err := json.Marshal(tx.Metadata)
 	if err != nil {
 		return fmt.Errorf("error marshaling metadata: %w", err)
 	}
 
 	// Add to indexes
-	s.addToIndexes(ctx, tx, queue)
+	s.addToIndexes(ctx, tx)
 
 	// Store metadata
-	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", queue), metaKey, metaData).Err()
+	err = s.rdb.HSet(ctx, s.MetaKey, txKey, metaData).Err()
 
 	if err != nil {
 		return fmt.Errorf("error updating metadata: %s", err)
@@ -65,19 +74,19 @@ func (s *Storage) StoreTransaction(ctx context.Context, tx *model.StoredTransact
 }
 
 // Update StoredTransaction with Receipt Details
-func (s *Storage) UpdateTransaction(ctx context.Context, tx *types.Transaction, queue string, status model.TransactionStatus, time int64) error {
+func (s *ClientStorage) UpdateTransaction(ctx context.Context, tx *types.Transaction, clientTxQueue string, status model.TransactionStatus, time int64) error {
 	// Recover sender from signature
 	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 	if err != nil {
 		return fmt.Errorf("failed to recover transaction sender: %w", err)
 	}
 
-	txKey := pkg.GetTxKey(tx, sender)
+	txKey := utils.GetTxKey(tx, sender)
 
 	// Step 1: Get existing metadata
-	val, err := s.rdb.HGet(ctx, fmt.Sprintf("meta:%s", queue), txKey).Result()
+	val, err := s.rdb.HGet(ctx, s.MetaKey, txKey).Result()
 	if err != nil {
-		return fmt.Errorf("failed to get transaction metadata from queue %s: %w", queue, err)
+		return fmt.Errorf("failed to get transaction metadata from queue %s: %w", s.MetaKey, err)
 	}
 
 	// Step 2: Unmarshal
@@ -89,13 +98,13 @@ func (s *Storage) UpdateTransaction(ctx context.Context, tx *types.Transaction, 
 	// Step 3: Update based on status
 	switch status {
 	case model.StatusQueued:
-		err = s.updateTransactionQueued(ctx, tx, queue, txKey, meta, sender, time)
+		err = s.updateTransactionQueued(ctx, tx, txKey, meta, sender, time)
 	case model.StatusPending:
-		err = s.updateTransactionPending(ctx, tx, queue, txKey, meta, sender, time)
+		err = s.updateTransactionPending(ctx, tx, txKey, meta, sender, time)
 	case model.StatusDropped:
-		err = s.updateTransactionDropped(ctx, queue, txKey, meta, time)
+		err = s.updateTransactionDropped(ctx, txKey, meta, time)
 	case model.StatusMined:
-		err = s.updateTransactionMined(ctx, queue, txKey, meta, time)
+		err = s.updateTransactionMined(ctx, txKey, meta, time)
 	default:
 		return fmt.Errorf("unknown status: %v", status)
 	}
@@ -103,9 +112,9 @@ func (s *Storage) UpdateTransaction(ctx context.Context, tx *types.Transaction, 
 	return err
 }
 
-func (s *Storage) updateTransactionPending(ctx context.Context, tx *types.Transaction, queue, txKey string, meta map[string]any, sender common.Address, time int64) error {
+func (s *ClientStorage) updateTransactionPending(ctx context.Context, tx *types.Transaction, txKey string, meta map[string]any, sender common.Address, time int64) error {
 	meta["status"] = model.StatusPending
-	meta["type"] = pkg.GetTransactionType(tx)
+	meta["type"] = utils.GetTransactionType(tx)
 	meta["nonce"] = tx.Nonce()
 	meta["from"] = sender.Hex()
 	if tx.To() != nil {
@@ -114,26 +123,26 @@ func (s *Storage) updateTransactionPending(ctx context.Context, tx *types.Transa
 	meta["time_pending"] = time
 	meta["time_received"] = tx.Time()
 
-	return s.saveMetadata(ctx, queue, txKey, meta)
+	return s.saveMetadata(ctx, txKey, meta)
 }
 
-func (s *Storage) updateTransactionMined(ctx context.Context, queue, txKey string, meta map[string]any, time int64) error {
+func (s *ClientStorage) updateTransactionMined(ctx context.Context, txKey string, meta map[string]any, time int64) error {
 	meta["status"] = model.StatusMined
 	meta["time_mined"] = time
 
-	return s.saveMetadata(ctx, queue, txKey, meta)
+	return s.saveMetadata(ctx, txKey, meta)
 }
 
-func (s *Storage) updateTransactionDropped(ctx context.Context, queue, txKey string, meta map[string]any, time int64) error {
+func (s *ClientStorage) updateTransactionDropped(ctx context.Context, txKey string, meta map[string]any, time int64) error {
 	meta["status"] = model.StatusDropped
 	meta["time_failed"] = time
 
-	return s.saveMetadata(ctx, queue, txKey, meta)
+	return s.saveMetadata(ctx, txKey, meta)
 }
 
-func (s *Storage) updateTransactionQueued(ctx context.Context, tx *types.Transaction, queue, txKey string, meta map[string]any, sender common.Address, time int64) error {
+func (s *ClientStorage) updateTransactionQueued(ctx context.Context, tx *types.Transaction, txKey string, meta map[string]any, sender common.Address, time int64) error {
 	meta["status"] = model.StatusQueued
-	meta["type"] = pkg.GetTransactionType(tx)
+	meta["type"] = utils.GetTransactionType(tx)
 	meta["nonce"] = tx.Nonce()
 	meta["from"] = sender.Hex()
 	if tx.To() != nil {
@@ -142,17 +151,18 @@ func (s *Storage) updateTransactionQueued(ctx context.Context, tx *types.Transac
 	meta["time_queued"] = time
 	meta["time_received"] = tx.Time()
 
-	return s.saveMetadata(ctx, queue, txKey, meta)
+	return s.saveMetadata(ctx, txKey, meta)
 }
 
-func (s *Storage) saveMetadata(ctx context.Context, queue, txKey string, meta map[string]any) error {
+func (s *ClientStorage) saveMetadata(ctx context.Context, txKey string, meta map[string]any) error {
 	updated, err := json.Marshal(meta)
 	if err != nil {
 		return fmt.Errorf("error marshaling metadata: %w", err)
 	}
 
-	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", queue), txKey, updated).Err()
-	if err == redis.Nil {} else if err != nil {
+	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", s.TxKey), txKey, updated).Err()
+	if err == redis.Nil {
+	} else if err != nil {
 		return fmt.Errorf("error saving metadata: %w", err)
 	}
 
@@ -160,39 +170,38 @@ func (s *Storage) saveMetadata(ctx context.Context, queue, txKey string, meta ma
 }
 
 // addToIndexes adds the transaction to various indexes for efficient filtering
-func (s *Storage) addToIndexes(ctx context.Context, tx *model.StoredTransaction, queue string) {
+func (s *ClientStorage) addToIndexes(ctx context.Context, tx *model.StoredTransaction) {
 	pipe := s.rdb.Pipeline()
 	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
+	client := s.client
 
 	// Index by gas price
 	if tx.Metadata.GasPrice != nil {
-		pipe.ZAdd(ctx, fmt.Sprintf("%s:gas", queue), redis.Z{
+		pipe.ZAdd(ctx, utils.RedisGasIndexKey(client), redis.Z{
 			Score:  float64(tx.Metadata.GasPrice.Int64()),
 			Member: txKey,
 		})
 	}
 
 	// Index by nonce
-	pipe.ZAdd(ctx, fmt.Sprintf("%s:nonce", queue), redis.Z{
+	pipe.ZAdd(ctx, utils.RedisNonceIndexKey(client), redis.Z{
 		Score:  float64(tx.Metadata.Nonce),
 		Member: txKey,
 	})
 
 	// Index by type
-	pipe.ZAdd(ctx, fmt.Sprintf("%s:type", queue), redis.Z{
+	pipe.ZAdd(ctx, utils.RedisTypeIndexKey(client), redis.Z{
 		Score:  float64(tx.Metadata.Type),
 		Member: txKey,
 	})
 
-	_, err := pipe.Exec(ctx)
-
-	if err != nil {
-		s.logger.Error(fmt.Sprintf("Error adding transaction %s", err))
+	if _, err := pipe.Exec(ctx); err != nil {
+		s.logger.Error(fmt.Sprintf("Error adding transaction to indexes: %s", err))
 	}
 }
 
 // FilterTransactions retrieves transactions based on filter criteria from a specific queue
-func (s *Storage) FilterTransactions(ctx context.Context, queue string, criteria model.FilterCriteria) ([]model.StoredTransaction, error) {
+func (s *ClientStorage) FilterTransactions(ctx context.Context, queue string, criteria model.FilterCriteria) ([]model.StoredTransaction, error) {
 	// Get all transactions from the queue
 	txMap, err := s.rdb.HGetAll(ctx, queue).Result()
 	if err != nil {
@@ -216,7 +225,7 @@ func (s *Storage) FilterTransactions(ctx context.Context, queue string, criteria
 }
 
 // matchesFilter checks if a transaction matches the filter criteria
-func (s *Storage) matchesFilter(tx model.StoredTransaction, criteria model.FilterCriteria) bool {
+func (s *ClientStorage) matchesFilter(tx model.StoredTransaction, criteria model.FilterCriteria) bool {
 	// Check gas price range
 	if criteria.GasPriceRange.Min != nil {
 		if tx.Metadata.GasPrice != nil && tx.Metadata.GasPrice.Cmp(criteria.GasPriceRange.Min) < 0 {
@@ -280,7 +289,7 @@ func (s *Storage) matchesFilter(tx model.StoredTransaction, criteria model.Filte
 }
 
 // GroupTransactions groups transactions based on grouping criteria from a specific queue
-func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria model.GroupingCriteria) (*model.GroupedTransactions, error) {
+func (s *ClientStorage) GroupTransactions(ctx context.Context, queue string, criteria model.GroupingCriteria) (*model.GroupedTransactions, error) {
 	// Get all transactions from the queue
 	txMap, err := s.rdb.HGetAll(ctx, queue).Result()
 	if err != nil {
@@ -314,7 +323,7 @@ func (s *Storage) GroupTransactions(ctx context.Context, queue string, criteria 
 }
 
 // getGroupKey generates a key for grouping transactions
-func (s *Storage) getGroupKey(tx model.StoredTransaction, criteria model.GroupingCriteria) string {
+func (s *ClientStorage) getGroupKey(tx model.StoredTransaction, criteria model.GroupingCriteria) string {
 	var parts []string
 
 	if criteria.GroupByGasPrice {

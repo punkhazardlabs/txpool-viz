@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"txpool-viz/pkg"
+	"txpool-viz/internal/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -15,11 +15,11 @@ import (
 
 type transactionServiceImpl struct {
 	redis  *redis.Client
-	logger pkg.Logger
+	logger logger.Logger
 }
 
 // NewTransactionService creates a new transaction service
-func NewTransactionService(ctx context.Context, r *redis.Client, l pkg.Logger) *transactionServiceImpl {
+func NewTransactionService(ctx context.Context, r *redis.Client, l logger.Logger) *transactionServiceImpl {
 	return &transactionServiceImpl{
 		redis:  r,
 		logger: l,

@@ -1,4 +1,4 @@
-package pkg
+package utils
 
 import (
 	"fmt"
@@ -22,6 +22,8 @@ func GetTransactionType(tx *types.Transaction) model.TransactionType {
 	}
 }
 
+// Given a transaction and the sender address
+// It returns the transactions unique id -> txhash:nonce
 func GetTxKey(tx *types.Transaction, addr common.Address) string {
 	txKey := fmt.Sprintf("%s:%d", addr, tx.Nonce())
 	return txKey
