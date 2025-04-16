@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/utils"
@@ -22,94 +25,133 @@ type ClientStorage struct {
 	client string
 
 	// Redis key references
-	MetaKey string
-	TxKey   string
+	MetaKey   string
+	TxKey     string
+	StreamKey string
 }
 
 // NewStorage creates a new storage instance
 func NewClientStorage(client string, rdb *redis.Client, l logger.Logger) *ClientStorage {
 	return &ClientStorage{
-		rdb:     rdb,
-		logger:  l,
-		client:  client,
-		MetaKey: utils.RedisClientMetaKey(client),
-		TxKey:   utils.RedisClientTxKey(client),
+		rdb:       rdb,
+		logger:    l,
+		client:    client,
+		MetaKey:   utils.RedisClientMetaKey(client),
+		TxKey:     utils.RedisClientTxKey(client),
+		StreamKey: utils.RedisStreamKey(client),
 	}
 }
 
 // StoreTransaction stores a transaction with its metadata in the specified queue
-func (s *ClientStorage) StoreTransaction(ctx context.Context, tx *model.StoredTransaction) error {
-	// Create the transaction key
-	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
-
-	// Store the full transaction data in the queue hash
-	txData, err := json.Marshal(tx)
-	if err != nil {
-		return fmt.Errorf("error marshaling transaction: %w", err)
+func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string) error {
+	// Store entry in Redis queue hash. We have no TX details at this point
+	if err := s.rdb.HSet(ctx, s.TxKey, txHash, "").Err(); err != nil {
+		return fmt.Errorf("error creating transaction entry in queue %s: %w", s.TxKey, err)
 	}
 
-	// Store in Redis queue hash
-	if err := s.rdb.HSet(ctx, s.TxKey, txKey, txData).Err(); err != nil {
-		return fmt.Errorf("error storing transaction in queue %s: %w", s.TxKey, err)
+	// Store metadata separately for efficient filtering in per client hash txpool:geth:meta { txHash: Metadata }
+	txMetaData := &model.StoredTransaction{
+		Hash: txHash,
+		Metadata: model.TransactionMetadata{
+			Status: model.StatusReceived,
+		},
 	}
 
-	// Store metadata separately for efficient filtering
-	txKey = fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
-	metaData, err := json.Marshal(tx.Metadata)
+	txJsonMetaData, err := json.Marshal(txMetaData)
+
 	if err != nil {
 		return fmt.Errorf("error marshaling metadata: %w", err)
 	}
 
-	// Add to indexes
-	s.addToIndexes(ctx, tx)
-
-	// Store metadata
-	err = s.rdb.HSet(ctx, s.MetaKey, txKey, metaData).Err()
+	// Store metadata entry
+	err = s.rdb.HSet(ctx, s.MetaKey, txHash, txJsonMetaData).Err()
 
 	if err != nil {
-		return fmt.Errorf("error updating metadata: %s", err)
+		return fmt.Errorf("error creating metadata entry txHash:%s, error: %s", txHash, err.Error())
 	}
 
 	return nil
 }
 
 // Update StoredTransaction with Receipt Details
-func (s *ClientStorage) UpdateTransaction(ctx context.Context, tx *types.Transaction, clientTxQueue string, status model.TransactionStatus, time int64) error {
-	// Recover sender from signature
-	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-	if err != nil {
-		return fmt.Errorf("failed to recover transaction sender: %w", err)
+func (s *ClientStorage) UpdateTransaction(
+	ctx context.Context,
+	tx *types.Transaction,
+	clientTxQueue string,
+	status model.TransactionStatus,
+	timestamp int64,
+) error {
+	txHash := tx.Hash().Hex()
+
+	// Attempt to get transaction metadata
+	val, err := s.rdb.HGet(ctx, s.MetaKey, txHash).Result()
+	if err == redis.Nil {
+		// Retry logic: only requeue up to 5 times
+		if err := s.shouldRequeueTx(ctx, tx); err != nil {
+			fmt.Println("Requeue")
+			return err
+		}
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get transaction metadata from %s: %w", s.MetaKey, err)
 	}
 
-	txKey := utils.GetTxKey(tx, sender)
-
-	// Step 1: Get existing metadata
-	val, err := s.rdb.HGet(ctx, s.MetaKey, txKey).Result()
-	if err != nil {
-		return fmt.Errorf("failed to get transaction metadata from queue %s: %w", s.MetaKey, err)
-	}
-
-	// Step 2: Unmarshal
+	// Unmarshal metadata
 	var meta map[string]any
 	if err := json.Unmarshal([]byte(val), &meta); err != nil {
 		return fmt.Errorf("failed to unmarshal transaction metadata: %w", err)
 	}
 
-	// Step 3: Update based on status
+	// Recover sender
+	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+	if err != nil {
+		return fmt.Errorf("failed to recover transaction sender: %w", err)
+	}
+
+	// Delegate update based on transaction status
 	switch status {
 	case model.StatusQueued:
-		err = s.updateTransactionQueued(ctx, tx, txKey, meta, sender, time)
+		err = s.updateTransactionQueued(ctx, tx, txHash, meta, sender, timestamp)
 	case model.StatusPending:
-		err = s.updateTransactionPending(ctx, tx, txKey, meta, sender, time)
+		err = s.updateTransactionPending(ctx, tx, txHash, meta, sender, timestamp)
 	case model.StatusDropped:
-		err = s.updateTransactionDropped(ctx, txKey, meta, time)
+		err = s.updateTransactionDropped(ctx, txHash, meta, timestamp)
 	case model.StatusMined:
-		err = s.updateTransactionMined(ctx, txKey, meta, time)
+		err = s.updateTransactionMined(ctx, txHash, meta, timestamp)
 	default:
-		return fmt.Errorf("unknown status: %v", status)
+		err = fmt.Errorf("unknown transaction status: %v", status)
 	}
 
 	return err
+}
+
+// Requeue logic with retry limit
+func (s *ClientStorage) shouldRequeueTx(ctx context.Context, tx *types.Transaction) error {
+	const maxRetries = 5
+
+	txHash := tx.Hash().Hex()
+	retryKey := fmt.Sprintf("retry:%s", txHash)
+
+	// Get current retry count
+	retryStr, err := s.rdb.Get(ctx, retryKey).Result()
+	retries := 0
+	if err == nil {
+		retries, _ = strconv.Atoi(retryStr)
+	}
+
+	if retries < maxRetries {
+		// Increment and requeue
+		if err := s.rdb.Set(ctx, retryKey, retries+1, 15*time.Minute).Err(); err != nil {
+			return fmt.Errorf("failed to set retry count: %w", err)
+		}
+		if err := s.rdb.RPush(ctx, s.StreamKey, fmt.Sprintf("%s:%s", s.client, txHash)).Err(); err != nil {
+			return fmt.Errorf("failed to requeue transaction: %w", err)
+		}
+	} else {
+		log.Printf("Dropping tx %s after %d retries", txHash, retries)
+	}
+
+	return nil
 }
 
 func (s *ClientStorage) updateTransactionPending(ctx context.Context, tx *types.Transaction, txKey string, meta map[string]any, sender common.Address, time int64) error {
@@ -122,6 +164,23 @@ func (s *ClientStorage) updateTransactionPending(ctx context.Context, tx *types.
 	}
 	meta["time_pending"] = time
 	meta["time_received"] = tx.Time()
+
+	// Convert meta to JSON string
+	metaJSON, err := json.Marshal(meta)
+
+
+	if err != nil {
+		return fmt.Errorf("error marshaling metadata: %w", err)
+	}
+
+	// Unmarshal into StoredTransaction
+	var storedTx model.StoredTransaction
+	if err := json.Unmarshal(metaJSON, &storedTx); err != nil {
+		return fmt.Errorf("error unmarshaling metadata: %w", err)
+	}
+
+	// Index
+	s.addToIndexes(ctx, &storedTx)
 
 	return s.saveMetadata(ctx, txKey, meta)
 }
@@ -151,6 +210,21 @@ func (s *ClientStorage) updateTransactionQueued(ctx context.Context, tx *types.T
 	meta["time_queued"] = time
 	meta["time_received"] = tx.Time()
 
+	// Convert meta to JSON string
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("error marshaling metadata: %w", err)
+	}
+
+	// Unmarshal into StoredTransaction
+	var storedTx model.StoredTransaction
+	if err := json.Unmarshal(metaJSON, &storedTx); err != nil {
+		return fmt.Errorf("error unmarshaling metadata: %w", err)
+	}
+
+	// Index
+	s.addToIndexes(ctx, &storedTx)
+
 	return s.saveMetadata(ctx, txKey, meta)
 }
 
@@ -160,7 +234,7 @@ func (s *ClientStorage) saveMetadata(ctx context.Context, txKey string, meta map
 		return fmt.Errorf("error marshaling metadata: %w", err)
 	}
 
-	err = s.rdb.HSet(ctx, fmt.Sprintf("meta:%s", s.TxKey), txKey, updated).Err()
+	err = s.rdb.HSet(ctx, s.MetaKey, txKey, updated).Err()
 	if err == redis.Nil {
 	} else if err != nil {
 		return fmt.Errorf("error saving metadata: %w", err)
@@ -172,7 +246,7 @@ func (s *ClientStorage) saveMetadata(ctx context.Context, txKey string, meta map
 // addToIndexes adds the transaction to various indexes for efficient filtering
 func (s *ClientStorage) addToIndexes(ctx context.Context, tx *model.StoredTransaction) {
 	pipe := s.rdb.Pipeline()
-	txKey := fmt.Sprintf("%s:%d", tx.Metadata.From, tx.Metadata.Nonce)
+	txKey := tx.Hash
 	client := s.client
 
 	// Index by gas price

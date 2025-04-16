@@ -101,7 +101,8 @@ func processTransaction(ctx context.Context, txHash string, endpoint *config.End
 			return
 		}
 		// Requeue for further processing
-		if err := srvc.Redis.RPush(ctx, fmt.Sprintf("stream:%s", endpoint.Name),
+		streamKey := utils.RedisStreamKey(endpoint.Name)
+		if err := srvc.Redis.RPush(ctx, streamKey,
 			fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
 			srvc.Logger.Error("Error requeueing transaction", logger.Fields{
 				"txHash": txHash,
