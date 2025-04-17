@@ -67,13 +67,13 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	}
 }
 
-func processTransaction(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.ClientStorage, time int64) {
+func processTransaction(ctx context.Context, txHash string, endpoint *config.Endpoint, srvc *service.Service, storage *storage.ClientStorage, timestamp int64) {
 	// Pull the TX receipts
 	tx, isPending, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
 
 	// Handle transaction not found
 	if err == ethereum.NotFound {
-		if err := storage.UpdateTransaction(ctx, tx, model.StatusDropped, time); err != nil {
+		if err := storage.UpdateTransaction(ctx, tx, model.StatusDropped, timestamp); err != nil {
 			srvc.Logger.Error("Error updating dropped transaction", logger.Fields{
 				"txHash": txHash,
 				"error":  err.Error(),
@@ -93,7 +93,7 @@ func processTransaction(ctx context.Context, txHash string, endpoint *config.End
 
 	// Handle queued transactions
 	if !isPending {
-		if err := storage.UpdateTransaction(ctx, tx, model.StatusQueued, time); err != nil {
+		if err := storage.UpdateTransaction(ctx, tx, model.StatusQueued, timestamp); err != nil {
 			srvc.Logger.Error("Error updating queued transaction", logger.Fields{
 				"txHash": txHash,
 				"error":  err.Error(),
@@ -101,6 +101,7 @@ func processTransaction(ctx context.Context, txHash string, endpoint *config.End
 			return
 		}
 		// Requeue for further processing
+		time.Sleep(5 * time.Second)
 		streamKey := utils.RedisStreamKey(endpoint.Name)
 		if err := srvc.Redis.RPush(ctx, streamKey,
 			fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
@@ -113,7 +114,7 @@ func processTransaction(ctx context.Context, txHash string, endpoint *config.End
 	}
 
 	// Handle pending transactions
-	if err := storage.UpdateTransaction(ctx, tx, model.StatusPending, time); err != nil {
+	if err := storage.UpdateTransaction(ctx, tx, model.StatusPending, timestamp); err != nil {
 		srvc.Logger.Error("Error updating pending transaction", logger.Fields{
 			"txHash": txHash,
 			"error":  err.Error(),
