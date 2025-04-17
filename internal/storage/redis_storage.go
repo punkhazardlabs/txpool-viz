@@ -2,9 +2,9 @@ package storage
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +12,8 @@ import (
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/utils"
+
+	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -37,35 +39,29 @@ func NewClientStorage(client string, rdb *redis.Client, l logger.Logger) *Client
 		logger:    l,
 		client:    client,
 		MetaKey:   utils.RedisClientMetaKey(client),
-		TxKey:     utils.RedisClientTxKey(client),
 		StreamKey: utils.RedisStreamKey(client),
 	}
 }
 
-// StoreTransaction stores a transaction with its metadata in the specified queue
-func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string) error {
-	// Store entry in Redis queue hash. We have no TX details at this point
-	if err := s.rdb.HSet(ctx, s.TxKey, txHash, "").Err(); err != nil {
-		return fmt.Errorf("error creating transaction entry in queue %s: %w", s.TxKey, err)
-	}
-
-	// Store metadata separately for efficient filtering in per client hash txpool:geth:meta { txHash: Metadata }
+// StoreTransaction stores a transaction with its metadata in the specified per-client queue
+func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string, time int64) error {
+	// 1. Store metadata and tx data separately for efficient filtering in per client hash txpool:geth:meta { txHash: StoredTx: {Tx, TxMetadata}}
 	txMetaData := &model.StoredTransaction{
 		Hash: txHash,
 		Metadata: model.TransactionMetadata{
-			Status: model.StatusReceived,
+			Status:       model.StatusReceived,
+			TimeReceived: time,
 		},
 	}
 
+	// Serialize metadata to JSON
 	txJsonMetaData, err := json.Marshal(txMetaData)
-
 	if err != nil {
 		return fmt.Errorf("error marshaling metadata: %w", err)
 	}
 
-	// Store metadata entry
+	// 3. Store metadata entry in Redis
 	err = s.rdb.HSet(ctx, s.MetaKey, txHash, txJsonMetaData).Err()
-
 	if err != nil {
 		return fmt.Errorf("error creating metadata entry txHash:%s, error: %s", txHash, err.Error())
 	}
@@ -77,7 +73,6 @@ func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string) err
 func (s *ClientStorage) UpdateTransaction(
 	ctx context.Context,
 	tx *types.Transaction,
-	clientTxQueue string,
 	status model.TransactionStatus,
 	timestamp int64,
 ) error {
@@ -88,7 +83,7 @@ func (s *ClientStorage) UpdateTransaction(
 	if err == redis.Nil {
 		// Retry logic: only requeue up to 5 times
 		if err := s.shouldRequeueTx(ctx, tx); err != nil {
-			fmt.Println("Requeue")
+			s.logger.Debug("Requeue tx %s", txHash)
 			return err
 		}
 		return nil
@@ -97,32 +92,68 @@ func (s *ClientStorage) UpdateTransaction(
 	}
 
 	// Unmarshal metadata
-	var meta map[string]any
-	if err := json.Unmarshal([]byte(val), &meta); err != nil {
+	var storedTx model.StoredTransaction
+	if err := json.Unmarshal([]byte(val), &storedTx); err != nil {
 		return fmt.Errorf("failed to unmarshal transaction metadata: %w", err)
 	}
 
-	// Recover sender
+	// Derive sender
 	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 	if err != nil {
-		return fmt.Errorf("failed to recover transaction sender: %w", err)
+		return fmt.Errorf("failed to derive sender: %w", err)
 	}
 
-	// Delegate update based on transaction status
+	// Update metadata fields
+	storedTx.Metadata.Status = status
+	storedTx.Tx = structureTx(tx, sender)
+
 	switch status {
 	case model.StatusQueued:
-		err = s.updateTransactionQueued(ctx, tx, txHash, meta, sender, timestamp)
+		storedTx.Metadata.TimeQueued = timestamp
 	case model.StatusPending:
-		err = s.updateTransactionPending(ctx, tx, txHash, meta, sender, timestamp)
+		storedTx.Metadata.TimePending = timestamp
 	case model.StatusDropped:
-		err = s.updateTransactionDropped(ctx, txHash, meta, timestamp)
+		storedTx.Metadata.TimeDropped = timestamp
 	case model.StatusMined:
-		err = s.updateTransactionMined(ctx, txHash, meta, timestamp)
-	default:
-		err = fmt.Errorf("unknown transaction status: %v", status)
+		storedTx.Metadata.TimeMined = timestamp
 	}
 
-	return err
+	// Re-serialize and store updated metadata
+	updated, err := json.Marshal(storedTx)
+	if err != nil {
+		return fmt.Errorf("error marshaling updated metadata: %w", err)
+	}
+
+	if err := s.rdb.HSet(ctx, s.MetaKey, txHash, updated).Err(); err != nil {
+		return fmt.Errorf("error saving updated metadata to Redis: %w", err)
+	}
+
+	s.addToIndexes(ctx, &storedTx)
+
+	return nil
+}
+
+// extracts the core fields from types.Transaction into model.Tx
+func structureTx(tx *types.Transaction, sender common.Address) model.Tx {
+	txData := model.Tx{
+		ChainID:          tx.ChainId().String(),
+		From:             sender.Hex(),
+		Nonce:            tx.Nonce(),
+		Value:            tx.Value().String(),
+		Gas:              tx.Gas(),
+		GasPrice:         tx.GasPrice(),
+		MaxFeePerGas:     tx.GasFeeCap().String(),
+		MaxPriorityFee:   tx.GasTipCap().String(),
+		MaxFeePerBlobGas: "",
+		Data:             hex.EncodeToString(tx.Data()),
+		Type:             tx.Type(),
+	}
+
+	if tx.To() != nil {
+		txData.To = tx.To().Hex()
+	}
+
+	return txData
 }
 
 // Requeue logic with retry limit
@@ -148,96 +179,11 @@ func (s *ClientStorage) shouldRequeueTx(ctx context.Context, tx *types.Transacti
 			return fmt.Errorf("failed to requeue transaction: %w", err)
 		}
 	} else {
-		log.Printf("Dropping tx %s after %d retries", txHash, retries)
-	}
+		err = s.UpdateTransaction(ctx, tx, model.StatusDropped, time.Now().Unix())
 
-	return nil
-}
-
-func (s *ClientStorage) updateTransactionPending(ctx context.Context, tx *types.Transaction, txKey string, meta map[string]any, sender common.Address, time int64) error {
-	meta["status"] = model.StatusPending
-	meta["type"] = utils.GetTransactionType(tx)
-	meta["nonce"] = tx.Nonce()
-	meta["from"] = sender.Hex()
-	if tx.To() != nil {
-		meta["to"] = tx.To().Hex()
-	}
-	meta["time_pending"] = time
-	meta["time_received"] = tx.Time()
-
-	// Convert meta to JSON string
-	metaJSON, err := json.Marshal(meta)
-
-
-	if err != nil {
-		return fmt.Errorf("error marshaling metadata: %w", err)
-	}
-
-	// Unmarshal into StoredTransaction
-	var storedTx model.StoredTransaction
-	if err := json.Unmarshal(metaJSON, &storedTx); err != nil {
-		return fmt.Errorf("error unmarshaling metadata: %w", err)
-	}
-
-	// Index
-	s.addToIndexes(ctx, &storedTx)
-
-	return s.saveMetadata(ctx, txKey, meta)
-}
-
-func (s *ClientStorage) updateTransactionMined(ctx context.Context, txKey string, meta map[string]any, time int64) error {
-	meta["status"] = model.StatusMined
-	meta["time_mined"] = time
-
-	return s.saveMetadata(ctx, txKey, meta)
-}
-
-func (s *ClientStorage) updateTransactionDropped(ctx context.Context, txKey string, meta map[string]any, time int64) error {
-	meta["status"] = model.StatusDropped
-	meta["time_failed"] = time
-
-	return s.saveMetadata(ctx, txKey, meta)
-}
-
-func (s *ClientStorage) updateTransactionQueued(ctx context.Context, tx *types.Transaction, txKey string, meta map[string]any, sender common.Address, time int64) error {
-	meta["status"] = model.StatusQueued
-	meta["type"] = utils.GetTransactionType(tx)
-	meta["nonce"] = tx.Nonce()
-	meta["from"] = sender.Hex()
-	if tx.To() != nil {
-		meta["to"] = tx.To().Hex()
-	}
-	meta["time_queued"] = time
-	meta["time_received"] = tx.Time()
-
-	// Convert meta to JSON string
-	metaJSON, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("error marshaling metadata: %w", err)
-	}
-
-	// Unmarshal into StoredTransaction
-	var storedTx model.StoredTransaction
-	if err := json.Unmarshal(metaJSON, &storedTx); err != nil {
-		return fmt.Errorf("error unmarshaling metadata: %w", err)
-	}
-
-	// Index
-	s.addToIndexes(ctx, &storedTx)
-
-	return s.saveMetadata(ctx, txKey, meta)
-}
-
-func (s *ClientStorage) saveMetadata(ctx context.Context, txKey string, meta map[string]any) error {
-	updated, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("error marshaling metadata: %w", err)
-	}
-
-	err = s.rdb.HSet(ctx, s.MetaKey, txKey, updated).Err()
-	if err == redis.Nil {
-	} else if err != nil {
-		return fmt.Errorf("error saving metadata: %w", err)
+		if err != nil {
+			return fmt.Errorf("failed to update dropped transaction: %w", err)
+		}
 	}
 
 	return nil
@@ -250,22 +196,22 @@ func (s *ClientStorage) addToIndexes(ctx context.Context, tx *model.StoredTransa
 	client := s.client
 
 	// Index by gas price
-	if tx.Metadata.GasPrice != nil {
+	if tx.Tx.GasPrice != nil {
 		pipe.ZAdd(ctx, utils.RedisGasIndexKey(client), redis.Z{
-			Score:  float64(tx.Metadata.GasPrice.Int64()),
+			Score:  float64(tx.Tx.GasPrice.Int64()),
 			Member: txKey,
 		})
 	}
 
 	// Index by nonce
 	pipe.ZAdd(ctx, utils.RedisNonceIndexKey(client), redis.Z{
-		Score:  float64(tx.Metadata.Nonce),
+		Score:  float64(tx.Tx.Nonce),
 		Member: txKey,
 	})
 
 	// Index by type
 	pipe.ZAdd(ctx, utils.RedisTypeIndexKey(client), redis.Z{
-		Score:  float64(tx.Metadata.Type),
+		Score:  float64(tx.Tx.Type),
 		Member: txKey,
 	})
 
@@ -302,21 +248,21 @@ func (s *ClientStorage) FilterTransactions(ctx context.Context, queue string, cr
 func (s *ClientStorage) matchesFilter(tx model.StoredTransaction, criteria model.FilterCriteria) bool {
 	// Check gas price range
 	if criteria.GasPriceRange.Min != nil {
-		if tx.Metadata.GasPrice != nil && tx.Metadata.GasPrice.Cmp(criteria.GasPriceRange.Min) < 0 {
+		if tx.Tx.GasPrice != nil && tx.Tx.GasPrice.Cmp(criteria.GasPriceRange.Min) < 0 {
 			return false
 		}
 	}
 	if criteria.GasPriceRange.Max != nil {
-		if tx.Metadata.GasPrice != nil && tx.Metadata.GasPrice.Cmp(criteria.GasPriceRange.Max) > 0 {
+		if tx.Tx.GasPrice != nil && tx.Tx.GasPrice.Cmp(criteria.GasPriceRange.Max) > 0 {
 			return false
 		}
 	}
 
 	// Check nonce range
-	if criteria.NonceRange.Min > 0 && tx.Metadata.Nonce < criteria.NonceRange.Min {
+	if criteria.NonceRange.Min > 0 && tx.Tx.Nonce < criteria.NonceRange.Min {
 		return false
 	}
-	if criteria.NonceRange.Max > 0 && tx.Metadata.Nonce > criteria.NonceRange.Max {
+	if criteria.NonceRange.Max > 0 && tx.Tx.Nonce > criteria.NonceRange.Max {
 		return false
 	}
 
@@ -324,7 +270,7 @@ func (s *ClientStorage) matchesFilter(tx model.StoredTransaction, criteria model
 	if len(criteria.AddressPatterns.From) > 0 {
 		matched := false
 		for _, pattern := range criteria.AddressPatterns.From {
-			if matched, _ = regexp.MatchString(pattern, tx.Metadata.From); matched {
+			if matched, _ = regexp.MatchString(pattern, tx.Tx.From); matched {
 				break
 			}
 		}
@@ -336,7 +282,7 @@ func (s *ClientStorage) matchesFilter(tx model.StoredTransaction, criteria model
 	if len(criteria.AddressPatterns.To) > 0 {
 		matched := false
 		for _, pattern := range criteria.AddressPatterns.To {
-			if matched, _ = regexp.MatchString(pattern, tx.Metadata.To); matched {
+			if matched, _ = regexp.MatchString(pattern, tx.Tx.To); matched {
 				break
 			}
 		}
@@ -347,13 +293,7 @@ func (s *ClientStorage) matchesFilter(tx model.StoredTransaction, criteria model
 
 	// Check transaction types
 	if len(criteria.Types) > 0 {
-		matched := false
-		for _, t := range criteria.Types {
-			if tx.Metadata.Type == t {
-				matched = true
-				break
-			}
-		}
+		matched := slices.Contains(criteria.Types, model.TransactionType(tx.Tx.Type))
 		if !matched {
 			return false
 		}
@@ -401,24 +341,24 @@ func (s *ClientStorage) getGroupKey(tx model.StoredTransaction, criteria model.G
 	var parts []string
 
 	if criteria.GroupByGasPrice {
-		if tx.Metadata.GasPrice != nil {
-			parts = append(parts, fmt.Sprintf("gas:%d", tx.Metadata.GasPrice.Int64()))
+		if tx.Tx.GasPrice != nil {
+			parts = append(parts, fmt.Sprintf("gas:%d", tx.Tx.GasPrice.Int64()))
 		}
 	}
 
 	if criteria.GroupByNonceRange {
-		parts = append(parts, fmt.Sprintf("nonce:%d", tx.Metadata.Nonce))
+		parts = append(parts, fmt.Sprintf("nonce:%d", tx.Tx.Nonce))
 	}
 
 	if criteria.GroupByAddress {
-		parts = append(parts, fmt.Sprintf("from:%s", tx.Metadata.From))
-		if tx.Metadata.To != "" {
-			parts = append(parts, fmt.Sprintf("to:%s", tx.Metadata.To))
+		parts = append(parts, fmt.Sprintf("from:%s", tx.Tx.From))
+		if tx.Tx.To != "" {
+			parts = append(parts, fmt.Sprintf("to:%s", tx.Tx.To))
 		}
 	}
 
 	if criteria.GroupByType {
-		parts = append(parts, fmt.Sprintf("type:%d", tx.Metadata.Type))
+		parts = append(parts, fmt.Sprintf("type:%d", tx.Tx.Type))
 	}
 
 	if len(parts) == 0 {

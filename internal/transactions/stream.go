@@ -82,7 +82,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l logger.Logg
 		})
 
 		// Create TX entry into cache
-		err = storage.StoreTransaction(ctx, txHash)
+		err = storage.StoreTransaction(ctx, txHash, time)
 
 		if err != nil {
 			l.Error("Error storing tx to cache", logger.Fields{

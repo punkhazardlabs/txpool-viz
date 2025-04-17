@@ -6,8 +6,7 @@ import (
 
 const (
 	redisStreamPrefix       = "txpool:%s:stream"      // Per-client stream (list of incoming tx hashes)
-	redisClientTxPrefix     = "txpool:%s:txdata"      // Per-client storage for raw tx metadata (hash -> fields)
-	redisClientMetaPrefix   = "txpool:%s:meta"        // Per-client high-level tx metadata (maybe summarized)
+	redisClientMetaPrefix   = "txpool:%s:meta"        // Per-client high-level tx & metadata records
 	redisUniversalSortedSet = "txpool:universal"      // Global ZSET of tx hashes ordered by received time
 	redisGasIndexPrefix     = "txpool:%s:index:gas"   // Sorted by gas price
 	redisNonceIndexPrefix   = "txpool:%s:index:nonce" // Sorted by nonce
@@ -18,9 +17,6 @@ func RedisStreamKey(client string) string {
 	return fmt.Sprintf(redisStreamPrefix, client)
 }
 
-func RedisClientTxKey(client string) string {
-	return fmt.Sprintf(redisClientTxPrefix, client)
-}
 
 func RedisClientMetaKey(client string) string {
 	return fmt.Sprintf(redisClientMetaPrefix, client)
