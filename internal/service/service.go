@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/redis/go-redis/v9"
 	"txpool-viz/config"
-	"txpool-viz/pkg"
+	"txpool-viz/internal/logger"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type Service struct {
 	Redis  *redis.Client
 	DB     string
-	Logger pkg.Logger
+	Logger logger.Logger
 }
 
 func NewService(cfg *config.Config) (*Service, error) {
@@ -36,7 +37,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 
 	// Initialize Logger
-	logger := pkg.NewLogger(nil)
+	logger := logger.NewLogger(nil)
 
 	return &Service{
 		Redis:  redisClient,

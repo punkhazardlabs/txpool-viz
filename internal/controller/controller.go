@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"txpool-viz/config"
-	// "txpool-viz/internal/broker"
 	"txpool-viz/internal/controller/handler"
 	route "txpool-viz/internal/controller/routes"
+	"txpool-viz/internal/logger"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/transactions"
-	"txpool-viz/pkg"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -118,7 +117,7 @@ func (c *Controller) setupServices() (*service.Service, error) {
 	}
 
 	// Initialize Logger
-	logger := pkg.NewLogger(nil)
+	logger := logger.NewLogger(nil)
 
 	return &service.Service{
 		Redis:  redisClient,
@@ -127,9 +126,8 @@ func (c *Controller) setupServices() (*service.Service, error) {
 	}, nil
 }
 
-func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l pkg.Logger) {
+func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l logger.Logger) {
 	handler := handler.NewHandler(ctx, r, l)
-
 
 	route.RegisterRoutes(c.router, &handler)
 

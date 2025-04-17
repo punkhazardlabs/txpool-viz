@@ -1,4 +1,4 @@
-package transactions
+package model
 
 import (
 	"math/big"
@@ -19,31 +19,39 @@ const (
 type TransactionStatus int
 
 const (
-	StatusQueued TransactionStatus = iota
+	StatusReceived TransactionStatus = iota
 	StatusPending
+	StatusQueued
 	StatusMined
 	StatusDropped
 )
 
 // TransactionMetadata contains additional metadata for filtering and grouping
 type TransactionMetadata struct {
-	Type             TransactionType   `json:"type"`
-	GasPrice         *big.Int          `json:"gas_price,omitempty"`
-	MaxFeePerGas     *big.Int          `json:"max_fee_per_gas,omitempty"`
-	MaxPriorityFee   *big.Int          `json:"max_priority_fee,omitempty"`
-	MaxFeePerBlobGas *big.Int          `json:"max_fee_per_blob_gas,omitempty"`
-	Nonce            uint64            `json:"nonce"`
-	From             string            `json:"from"`
-	To               string            `json:"to"`
-	IsContract       bool              `json:"is_contract"`
-	Timestamp        int64             `json:"timestamp"`
-	Status           TransactionStatus `json:"status"`
-	TimeReceived     int64             `json:"time_received"` // When first seen in mempool
-	TimePending      int64             `json:"time_pending"`  // When moved to pending
-	TimeMined        int64             `json:"time_mined"`    // When mined
-	TimeDropped      int64             `json:"time_dropped"`  // When dropped
-	BlockNumber      uint64            `json:"block_number"`  // If mined
-	BlockHash        string            `json:"block_hash"`    // If mined
+	Status       TransactionStatus `json:"status"`        // Custom status enum
+	IsContract   bool              `json:"is_contract"`   // Whether destination is contract
+	TimeReceived int64             `json:"time_received"` // When seen in mempool
+	TimePending  int64             `json:"time_pending"`
+	TimeQueued   int64             `json:"time_queued"`
+	TimeMined    int64             `json:"time_mined"`
+	TimeDropped  int64             `json:"time_dropped"`
+	BlockNumber  uint64            `json:"block_number,omitempty"`
+	BlockHash    string            `json:"block_hash,omitempty"`
+}
+
+type Tx struct {
+	ChainID          string   `json:"chain_id"`
+	From             string   `json:"from"`
+	To               string   `json:"to,omitempty"`
+	Nonce            uint64   `json:"nonce"`
+	Value            string   `json:"value"`
+	Gas              uint64   `json:"gas"`
+	GasPrice         *big.Int `json:"gas_price,omitempty"`
+	MaxFeePerGas     string   `json:"max_fee_per_gas,omitempty"`
+	MaxPriorityFee   string   `json:"max_priority_fee,omitempty"`
+	MaxFeePerBlobGas string   `json:"max_fee_per_blob_gas,omitempty"`
+	Data             string   `json:"data,omitempty"`
+	Type             uint8    `json:"type"`
 }
 
 // FilterCriteria represents the filtering options
@@ -82,6 +90,7 @@ type GroupingCriteria struct {
 // StoredTransaction represents a transaction with its metadata
 type StoredTransaction struct {
 	Hash     string              `json:"hash"`
+	Tx       Tx                  `json:"tx"`
 	Metadata TransactionMetadata `json:"metadata"`
 }
 

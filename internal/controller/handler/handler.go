@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
+	"txpool-viz/internal/logger"
 	"txpool-viz/internal/service"
-	"txpool-viz/pkg"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -20,7 +20,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new Handler
-func NewHandler(ctx context.Context, r *redis.Client, l pkg.Logger) Handler {
+func NewHandler(ctx context.Context, r *redis.Client, l logger.Logger) Handler {
 	transactionService := service.NewTransactionService(ctx, r, l)
 	return Handler{
 		TransactionService: transactionService,
