@@ -4,6 +4,8 @@ This project is still in development. This repo represents the core txpool-viz l
 
 [Original Idea Proposal](https://github.com/ethpandaops/tooling-wishlist/blob/master/open-ideas/txpool-viz.md)
 
+[Project Plan](https://github.com/punkhazardlabs/txpool-viz/wiki)
+
 [Discord Server](https://discord.gg/UEyf7U8Smr)
 
 ## Introduction:
