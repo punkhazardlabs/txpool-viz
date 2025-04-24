@@ -14,14 +14,8 @@ import (
 	"txpool-viz/utils"
 
 	"github.com/coder/websocket"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redis/go-redis/v9"
 )
-
-type Result struct {
-	Pending map[string]map[string]*types.Transaction `json:"pending"`
-	Queued  map[string]map[string]*types.Transaction `json:"queued"`
-}
 
 func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service) {
 	// Start listening to txhashes

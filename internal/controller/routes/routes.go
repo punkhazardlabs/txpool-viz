@@ -13,5 +13,5 @@ func RegisterRoutes(router *gin.Engine, handler *handler.Handler) {
 		ctx.String(http.StatusOK, "pong")
 	})
 
-	router.GET("/transactions", handler.TransactionService.GetLatestTransactions)
+	router.GET("/transactions", handler.GetLatestTransactions)
 }

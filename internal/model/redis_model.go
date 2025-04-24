@@ -102,3 +102,7 @@ type GroupedTransactions struct {
 		GroupCount        int   `json:"group_count"`
 	} `json:"stats"`
 }
+
+type CountArgs struct {
+	TxCount int64 `json:"tx_count" binding:"required"`
+}
