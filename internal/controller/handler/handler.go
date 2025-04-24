@@ -14,14 +14,14 @@ type Handler struct {
 }
 
 func (h *Handler) GetLatestTransactions(c *gin.Context) {
-	var rangeArgs model.RangeArgs
-	if err := c.ShouldBindQuery(&rangeArgs); err != nil {
+	var txCount model.CountArgs
+	if err := c.ShouldBindJSON(&txCount); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range parameters"})
 		return
 	}
 
 	ctx := c.Request.Context()
-	txs, err := h.TxService.GetLatestTransactions(ctx, rangeArgs.Start, rangeArgs.Stop)
+	txs, err := h.TxService.GetLatestNTransactions(ctx, txCount.TxCount)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

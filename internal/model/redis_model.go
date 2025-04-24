@@ -103,7 +103,6 @@ type GroupedTransactions struct {
 	} `json:"stats"`
 }
 
-type RangeArgs struct {
-	Start int64 `form:"start"`
-	Stop  int64 `form:"stop"`
+type CountArgs struct {
+	TxCount int64 `json:"tx_count" binding:"required"`
 }

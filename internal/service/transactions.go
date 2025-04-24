@@ -21,11 +21,9 @@ func NewTransactionService(ctx context.Context, r *redis.Client, l logger.Logger
 	}
 }
 
-// GetLatestTransactions handles the request to get the latest transactions
-func (ts *TransactionServiceImpl) GetLatestTransactions(ctx context.Context, start int64, stop int64) ([]string, error) {
-	if stop == 0 {
-		stop = -1
-	}
+func (ts *TransactionServiceImpl) GetLatestNTransactions(ctx context.Context, n int64) ([]string, error) {
+	start := -n
+	stop := int64(-1)
 
 	results, err := ts.redis.ZRangeWithScores(ctx, utils.RedisUniversalKey(), start, stop).Result()
 	if err != nil {
@@ -38,5 +36,6 @@ func (ts *TransactionServiceImpl) GetLatestTransactions(ctx context.Context, sta
 		hashes = append(hashes, z.Member.(string))
 	}
 
+	ts.logger.Info("GetLatestNTransactions called")
 	return hashes, nil
 }
