@@ -127,10 +127,14 @@ func (c *Controller) setupServices() (*service.Service, error) {
 }
 
 func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l logger.Logger) {
-	handler := handler.NewHandler(ctx, r, l)
+	//Initialize handler with needed services
+	txService := service.NewTransactionService(ctx, r, l)
+	handler := handler.NewHandler(txService)
 
-	route.RegisterRoutes(c.router, &handler)
+	// Register all routes
+	route.RegisterRoutes(c.router, handler)
 
+	// Configure server
 	c.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%s", os.Getenv("PORT")),
 		Handler:      c.router,

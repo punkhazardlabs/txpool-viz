@@ -1,28 +1,37 @@
 package handler
 
 import (
-	"context"
-	"txpool-viz/internal/logger"
+	"net/http"
+	"txpool-viz/internal/model"
 	"txpool-viz/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
-
-// TransactionService defines the methods for transaction handling
-type TransactionService interface {
-	GetLatestTransactions(ctx *gin.Context)
-}
 
 // Handler handles HTTP requests
 type Handler struct {
-	TransactionService TransactionService
+	TxService *service.TransactionServiceImpl
 }
 
-// NewHandler creates a new Handler
-func NewHandler(ctx context.Context, r *redis.Client, l logger.Logger) Handler {
-	transactionService := service.NewTransactionService(ctx, r, l)
-	return Handler{
-		TransactionService: transactionService,
+func (h *Handler) GetLatestTransactions(c *gin.Context) {
+	var rangeArgs model.RangeArgs
+	if err := c.ShouldBindQuery(&rangeArgs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range parameters"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	txs, err := h.TxService.GetLatestTransactions(ctx, rangeArgs.Start, rangeArgs.Stop)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, txs)
+}
+
+func NewHandler(service *service.TransactionServiceImpl) *Handler {
+	return &Handler{
+		TxService: service,
 	}
 }
