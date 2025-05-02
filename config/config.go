@@ -12,16 +12,17 @@ import (
 
 type Endpoint struct {
 	Name        string
-	RPCUrl      string						`yaml:"rpc_url"`
-	Websocket   string						`yaml:"socket"`
+	RPCUrl      string            `yaml:"rpc_url"`
+	Websocket   string            `yaml:"socket"`
 	AuthHeaders map[string]string `yaml:"auth_headers"`
-	Client			*ethclient.Client
+	Client      *ethclient.Client
 }
 
 type Config struct {
-	Endpoints []Endpoint               `yaml:"endpoints"`
-	Polling   map[string]time.Duration `yaml:"polling"`
-	Filters   map[string]string        `yaml:"filters"`
+	Endpoints    []Endpoint               `yaml:"endpoints"`
+	BeaconSSEUrl string                   `yaml:"beacon_sse_url"`
+	Polling      map[string]time.Duration `yaml:"polling"`
+	Filters      map[string]string        `yaml:"filters"`
 }
 
 func Load() (*Config, error) {
@@ -48,7 +49,7 @@ func Load() (*Config, error) {
 		}
 
 		userConfig.Endpoints[i].Client = client
-	}	
+	}
 
 	return userConfig, nil
 }

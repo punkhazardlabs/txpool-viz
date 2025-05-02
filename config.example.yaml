@@ -1,16 +1,16 @@
 endpoints:
-  - name: nethermind
-    rpc_url: 'http://127.0.0.1:62956'
-    socket: 'ws://127.0.0.1:62957'
-  - name: geth
-    rpc_url: 'http://127.0.0.1:62945'
-    socket: 'ws://127.0.0.1:62946'
-  - name: reth
-    rpc_url: 'http://127.0.0.1:63146'
-    socket: 'ws://127.0.0.1:63147'
+  - name: geth-teku
+    rpc_url: 'http://127.0.0.1:57826'
+    socket: 'ws://127.0.0.1:57827'
+  - name: geth-lodestar
+    rpc_url: 'http://127.0.0.1:57820'
+    socket: 'ws://127.0.0.1:57821'
+  - name: geth-prysm
+    rpc_url: 'http://127.0.0.1:57811'
+    socket: 'ws://127.0.0.1:57812'
+beacon_sse_url: 'http://127.0.0.1:52566'
 polling:
-  interval: 5s
+  interval: 1s
   timeout: 5s
 filters:
   min_gas_price: 1gwei
- 
