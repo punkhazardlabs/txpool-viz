@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"txpool-viz/config"
-	inclusion_list "txpool-viz/inclusion_lists"
 	"txpool-viz/internal/controller/handler"
 	route "txpool-viz/internal/controller/routes"
+	"txpool-viz/internal/inclusion_list"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/service"
+	"txpool-viz/internal/transactions"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -61,12 +62,11 @@ func (c *Controller) Serve() error {
 
 	// Call one method
 	// Method Takes config and spins up a process for each endpoint
-	// go transactions.Stream(ctx, c.Config, c.Services)
+	go transactions.Stream(ctx, c.Config, c.Services)
 
-	go inclusion_list.StreamInclusionList(c.Config.BeaconSSEUrl, c.Services.Logger)
-
-	// Start processing transactions
-	// go broker.ProcessTransactions(ctx, c.Config, c.Services)
+	// Start listening to the inclusion list SSEs
+	inclusionListService := inclusion_list.NewInclusionListService(c.Services.Logger, c.Services.Redis)
+	go inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
 
 	<-ctx.Done()
 	return nil
