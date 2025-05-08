@@ -14,6 +14,7 @@ import (
 	"txpool-viz/config"
 	"txpool-viz/internal/controller/handler"
 	route "txpool-viz/internal/controller/routes"
+	"txpool-viz/internal/inclusion_list"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/transactions"
@@ -63,11 +64,9 @@ func (c *Controller) Serve() error {
 	// Method Takes config and spins up a process for each endpoint
 	go transactions.Stream(ctx, c.Config, c.Services)
 
-	// Start polling transactions
-	// go transactions.PollTransactions(ctx, c.Config, c.Services)
-
-	// Start processing transactions
-	// go broker.ProcessTransactions(ctx, c.Config, c.Services)
+	// Start listening to the inclusion list SSEs
+	inclusionListService := inclusion_list.NewInclusionListService(c.Services.Logger, c.Services.Redis)
+	go inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
 
 	<-ctx.Done()
 	return nil

@@ -61,8 +61,6 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 			}
 
 			processTransaction(ctx, tx[1], endpoint, srvc, storage, currentTime)
-
-			srvc.Logger.Info(fmt.Sprintf("Processed. Client: %s, TxHash: %s", tx[0], tx[1]))
 		}
 	}
 }
@@ -124,7 +122,7 @@ func processTransaction(ctx context.Context, txHash string, endpoint *config.End
 }
 
 func monitorQueueSize(ctx context.Context, redis *redis.Client, logger logger.Logger, queue string, interval time.Duration) {
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(time.Duration(interval) * 5) // Adjust the interval as needed later. Maybe add to config.yaml
 	defer ticker.Stop()
 
 	for {
@@ -135,7 +133,7 @@ func monitorQueueSize(ctx context.Context, redis *redis.Client, logger logger.Lo
 				logger.Error(fmt.Sprintf("Error getting queue length: %s", err))
 				continue
 			}
-			logger.Info(fmt.Sprintf("Current queue size: %d", count))
+			logger.Info(fmt.Sprintf("Current queue size %s: %d", queue, count))
 		case <-ctx.Done():
 			return
 		}

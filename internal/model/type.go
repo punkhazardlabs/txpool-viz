@@ -30,3 +30,20 @@ type Result struct {
 	Pending map[string]map[string]*types.Transaction `json:"pending"`
 	Queued  map[string]map[string]*types.Transaction `json:"queued"`
 }
+
+type SSEMessage struct {
+	Slot                          string   `json:"slot"`
+	ValidatorIndex                string   `json:"validator_index"`
+	InclusionListCommitteeRoot    string   `json:"inclusion_list_committee_root"`
+	Transactions                  []string `json:"transactions"` // Array of transaction hashes
+}
+
+type Data struct {
+	Message   SSEMessage `json:"message"`
+	Signature string  `json:"signature"`
+}
+
+type MempoolMessage struct {
+	Version string `json:"version"`
+	Data    Data   `json:"data"`
+}
