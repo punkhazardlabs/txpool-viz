@@ -36,6 +36,5 @@ func (ts *TransactionServiceImpl) GetLatestNTransactions(ctx context.Context, n 
 		hashes = append(hashes, z.Member.(string))
 	}
 
-	ts.logger.Info("GetLatestNTransactions called")
 	return hashes, nil
 }
