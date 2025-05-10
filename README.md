@@ -52,6 +52,12 @@ Run the code
 make run
 ```
 
+The web ui will be served on port 5173. Confirm actual port on the terminal
+
+```
+http://localhost:5173
+```
+
 Local Development Tools:
 - [Kurtosis Ethereum Package](https://github.com/ethpandaops/ethereum-package) - Simulate a local testnet
 - [Spamoor](https://github.com/ethpandaops/spamoor) - Send spam tx's to your local testnet mempool
