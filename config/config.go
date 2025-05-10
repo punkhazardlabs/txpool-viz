@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -23,6 +24,7 @@ type Config struct {
 	BeaconSSEUrl string                   `yaml:"beacon_sse_url"`
 	Polling      map[string]time.Duration `yaml:"polling"`
 	Filters      map[string]string        `yaml:"filters"`
+	FrontendCmd  *exec.Cmd
 }
 
 func Load() (*Config, error) {
@@ -50,6 +52,19 @@ func Load() (*Config, error) {
 
 		userConfig.Endpoints[i].Client = client
 	}
+
+	var frontendCmd *exec.Cmd
+
+	// load frontend command
+	args := []string{"run", "dev", "--silent"}
+	frontendCmd = exec.Command("npm", args...)
+	frontendCmd.Dir = "./frontend"
+
+	// Redirect frontend logs to Go's stdout and stderr
+	frontendCmd.Stdout = os.Stdout
+	frontendCmd.Stderr = os.Stderr
+
+	userConfig.FrontendCmd = frontendCmd
 
 	return userConfig, nil
 }

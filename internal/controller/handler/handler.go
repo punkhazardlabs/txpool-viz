@@ -2,36 +2,38 @@ package handler
 
 import (
 	"net/http"
-	"txpool-viz/internal/model"
+	"strconv"
 	"txpool-viz/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-// Handler handles HTTP requests
 type Handler struct {
 	TxService *service.TransactionServiceImpl
 }
 
-func (h *Handler) GetLatestTransactions(c *gin.Context) {
-	var txCount model.CountArgs
-	if err := c.ShouldBindJSON(&txCount); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid range parameters"})
-		return
-	}
-
-	ctx := c.Request.Context()
-	txs, err := h.TxService.GetLatestNTransactions(ctx, txCount.TxCount)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, txs)
-}
+const DefaultTxCount = 1000
 
 func NewHandler(service *service.TransactionServiceImpl) *Handler {
 	return &Handler{
 		TxService: service,
 	}
+}
+
+func (h *Handler) GetLatestTransactions(c *gin.Context) {
+    txCountStr := c.DefaultQuery("tx_count", strconv.Itoa(DefaultTxCount))
+    txCount, err := strconv.Atoi(txCountStr)
+    if err != nil || txCount <= 0 {
+        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid tx_count parameter"})
+        return
+    }
+
+    ctx := c.Request.Context()
+    txs, err := h.TxService.GetLatestNTransactions(ctx, int64(txCount))
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusOK, txs)
 }

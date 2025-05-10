@@ -77,7 +77,6 @@ func (s *ClientStorage) UpdateTransaction(
 	timestamp int64,
 ) error {
 	txHash := tx.Hash().Hex()
-
 	// Attempt to get transaction metadata
 	val, err := s.rdb.HGet(ctx, s.MetaKey, txHash).Result()
 	if err == redis.Nil {

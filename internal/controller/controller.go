@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/transactions"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
@@ -68,7 +70,18 @@ func (c *Controller) Serve() error {
 	inclusionListService := inclusion_list.NewInclusionListService(c.Services.Logger, c.Services.Redis)
 	go inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
 
+	// Start the frontend server
+	if err := c.Config.FrontendCmd.Start(); err != nil {
+		c.Services.Logger.Error("Failed to start frontend server", logger.Fields{
+			"error": err,
+		})
+		return err
+	}
+
+	c.Services.Logger.Info("Frontend server started successfully")
+
 	<-ctx.Done()
+
 	return nil
 }
 
@@ -76,8 +89,17 @@ func (c *Controller) handleShutdown(cancel context.CancelFunc) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
-	log.Println("Shutting down...")
-	cancel()
+
+	c.Services.Logger.Info("Shutdown signal received. Initiating graceful shutdown...")
+
+	if frontendCmd := c.Config.FrontendCmd; frontendCmd != nil && frontendCmd.Process != nil {
+			_ = frontendCmd.Process.Signal(os.Interrupt) // Send interrupt signal, ignore errors
+			_ = frontendCmd.Wait()                       // Wait for the process to exit, ignore errors
+	}
+
+	c.Services.Logger.Info("Bye")
+
+	cancel() // Cancel the context to unblock Serve()
 }
 
 func (c *Controller) initialize() error {
@@ -129,6 +151,17 @@ func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l log
 	//Initialize handler with needed services
 	txService := service.NewTransactionService(ctx, r, l)
 	handler := handler.NewHandler(txService)
+
+	allowedOrigins := "http://localhost:5173" // Svelte default port
+
+	c.router.Use(cors.New(cors.Config{
+		AllowOrigins:     strings.Split(allowedOrigins, ","),
+		AllowMethods:     []string{"GET", "POST"}, // Restrict to required methods
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// Register all routes
 	route.RegisterRoutes(c.router, handler)
