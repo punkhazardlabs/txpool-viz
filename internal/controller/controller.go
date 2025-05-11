@@ -67,18 +67,19 @@ func (c *Controller) Serve() error {
 	go transactions.Stream(ctx, c.Config, c.Services)
 
 	// Start listening to the inclusion list SSEs
-	inclusionListService := inclusion_list.NewInclusionListService(c.Services.Logger, c.Services.Redis)
-	go inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
-
-	// Start the frontend server
-	if err := c.Config.FrontendCmd.Start(); err != nil {
-		c.Services.Logger.Error("Failed to start frontend server", logger.Fields{
-			"error": err,
-		})
-		return err
+	if c.Config.BeaconSSEUrl != "" {
+		inclusionListService := inclusion_list.NewInclusionListService(c.Services.Logger, c.Services.Redis)
+		go inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
 	}
 
-	c.Services.Logger.Info("Frontend server started successfully")
+	// Start the frontend server
+	fs := http.FileServer(http.Dir("./frontend/dist"))
+	http.Handle("/", fs)
+
+	c.Services.Logger.Info("Serving frontend at :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		c.Services.Logger.Error("Frontend server failed: %s", err.Error())
+	}
 
 	<-ctx.Done()
 
@@ -93,8 +94,8 @@ func (c *Controller) handleShutdown(cancel context.CancelFunc) {
 	c.Services.Logger.Info("Shutdown signal received. Initiating graceful shutdown...")
 
 	if frontendCmd := c.Config.FrontendCmd; frontendCmd != nil && frontendCmd.Process != nil {
-			_ = frontendCmd.Process.Signal(os.Interrupt) // Send interrupt signal, ignore errors
-			_ = frontendCmd.Wait()                       // Wait for the process to exit, ignore errors
+		_ = frontendCmd.Process.Signal(os.Interrupt) // Send interrupt signal, ignore errors
+		_ = frontendCmd.Wait()                       // Wait for the process to exit, ignore errors
 	}
 
 	c.Services.Logger.Info("Bye")
@@ -152,7 +153,7 @@ func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l log
 	txService := service.NewTransactionService(ctx, r, l)
 	handler := handler.NewHandler(txService)
 
-	allowedOrigins := "http://localhost:5173" // Svelte default port
+	allowedOrigins := "http://localhost:8080" // Svelte serve port
 
 	c.router.Use(cors.New(cors.Config{
 		AllowOrigins:     strings.Split(allowedOrigins, ","),

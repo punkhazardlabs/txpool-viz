@@ -8,7 +8,7 @@ endpoints:
   - name: geth-prysm
     rpc_url: 'http://127.0.0.1:57811'
     socket: 'ws://127.0.0.1:57812'
-beacon_sse_url: 'http://127.0.0.1:52566'
+beacon_sse_url: 'http://127.0.0.1:52566' # Beacon API connection. For Inclusion Lists
 polling:
   interval: 1s
   timeout: 5s
