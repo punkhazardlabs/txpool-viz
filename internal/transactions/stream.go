@@ -3,7 +3,9 @@ package transactions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"txpool-viz/config"
@@ -17,13 +19,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service) {
-	// Start listening to txhashes
+func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service, wg *sync.WaitGroup) {
 	ProcessTransactions(ctx, cfg, srvc)
 
-	// Start the streaming txhashes
 	for _, endpoint := range cfg.Endpoints {
-		go streamEndpoint(ctx, endpoint, srvc.Logger, srvc.Redis)
+		wg.Add(1)
+		go func(endpoint config.Endpoint) {
+			defer wg.Done()
+			streamEndpoint(ctx, endpoint, srvc.Logger, srvc.Redis)
+		}(endpoint)
 	}
 }
 
@@ -49,45 +53,44 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l logger.Logg
 
 	// Start streaming mempool txHashes
 	for {
-		// Capture time the system detects the txHash
-		time := time.Now().Unix()
-
-		_, msg, err := conn.Read(context.Background())
-
-		if err != nil {
-			l.Error(fmt.Sprintf("Error reading stream %s", err.Error()), logger.Fields{"endpoint": endpoint.Name})
+		select {
+		case <-ctx.Done():
+			l.Info("Shutting down streamEndpoint", logger.Fields{"endpoint": endpoint.Name})
 			return
-		}
+		default:
+			_, msg, err := conn.Read(ctx)
 
-		var event model.SubscriptionResponse
+			if err != nil {
+				if websocket.CloseStatus(err) == websocket.StatusNormalClosure || errors.Is(err, context.Canceled) {
+					return
+				}
+				l.Error(fmt.Sprintf("Error reading stream %s", err.Error()), logger.Fields{"endpoint": endpoint.Name})
+				return
+			}
 
-		err = json.Unmarshal(msg, &event)
-		if err != nil {
-			l.Error("JSON parse error")
-			continue
-		}
+			var event model.SubscriptionResponse
+			if err := json.Unmarshal(msg, &event); err != nil {
+				l.Error("JSON parse error")
+				continue
+			}
 
-		txHash := event.Params.TxHash
+			txHash := event.Params.TxHash
+			time := time.Now().Unix()
 
-		// Add to universal queue if it does not exist
-		r.ZAddNX(ctx, redisUniversalSortedSetKey, redis.Z{
-			Score:  float64(time),
-			Member: txHash,
-		})
-
-		// Create TX entry into cache
-		err = storage.StoreTransaction(ctx, txHash, time)
-
-		if err != nil {
-			l.Error("Error storing tx to cache", logger.Fields{
-				"txHash": txHash,
+			r.ZAddNX(ctx, redisUniversalSortedSetKey, redis.Z{
+				Score:  float64(time),
+				Member: txHash,
 			})
-		}
 
-		// Queue the txHash in the per-client queues to process the tx
-		streamKey := utils.RedisStreamKey(endpoint.Name)
-		r.RPush(context.Background(), streamKey, fmt.Sprintf("%s:%s", endpoint.Name, event.Params.TxHash))
+			if err := storage.StoreTransaction(ctx, txHash, time); err != nil {
+				l.Error("Error storing tx to cache", logger.Fields{"txHash": txHash})
+			}
+
+			streamKey := utils.RedisStreamKey(endpoint.Name)
+			r.RPush(ctx, streamKey, fmt.Sprintf("%s:%s", endpoint.Name, event.Params.TxHash))
+		}
 	}
+
 }
 
 func dialWebSocket(ctx context.Context, endpoint config.Endpoint, l logger.Logger) (*websocket.Conn, error) {
