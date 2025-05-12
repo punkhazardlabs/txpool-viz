@@ -1,14 +1,14 @@
 endpoints:
-  - name: geth-teku
+  - name: geth
     rpc_url: 'http://127.0.0.1:57826'
     socket: 'ws://127.0.0.1:57827'
-  - name: geth-lodestar
+  - name: nethermind
     rpc_url: 'http://127.0.0.1:57820'
     socket: 'ws://127.0.0.1:57821'
-  - name: geth-prysm
+  - name: reth
     rpc_url: 'http://127.0.0.1:57811'
     socket: 'ws://127.0.0.1:57812'
-beacon_sse_url: 'http://127.0.0.1:52566'
+beacon_sse_url: 'http://127.0.0.1:52566' # FOCIL Enabled bean api endpoint. Leave blank if not needed
 polling:
   interval: 1s
   timeout: 5s
