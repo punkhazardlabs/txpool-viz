@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/utils"
@@ -72,40 +70,28 @@ func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string, tim
 // Update StoredTransaction with Receipt Details
 func (s *ClientStorage) UpdateTransaction(
 	ctx context.Context,
+	txHash string,
 	tx *types.Transaction,
 	status model.TransactionStatus,
 	timestamp int64,
 ) error {
-	txHash := tx.Hash().Hex()
-	// Attempt to get transaction metadata
+	// Fetch transaction metadata
 	val, err := s.rdb.HGet(ctx, s.MetaKey, txHash).Result()
 	if err == redis.Nil {
-		// Retry logic: only requeue up to 5 times
-		if err := s.shouldRequeueTx(ctx, tx); err != nil {
-			s.logger.Debug("Requeue tx %s", txHash)
-			return err
-		}
+		// Drop that tx if it has no initial entry record
+		s.logger.Debug("Transaction metadata not found", "txHash", txHash)
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("failed to get transaction metadata from %s: %w", s.MetaKey, err)
 	}
 
-	// Unmarshal metadata
 	var storedTx model.StoredTransaction
 	if err := json.Unmarshal([]byte(val), &storedTx); err != nil {
 		return fmt.Errorf("failed to unmarshal transaction metadata: %w", err)
 	}
 
-	// Derive sender
-	sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-	if err != nil {
-		return fmt.Errorf("failed to derive sender: %w", err)
-	}
-
-	// Update metadata fields
+	// Update status and timestamp
 	storedTx.Metadata.Status = status
-	storedTx.Tx = structureTx(tx, sender)
-
 	switch status {
 	case model.StatusQueued:
 		storedTx.Metadata.TimeQueued = timestamp
@@ -117,7 +103,17 @@ func (s *ClientStorage) UpdateTransaction(
 		storedTx.Metadata.TimeMined = timestamp
 	}
 
-	// Re-serialize and store updated metadata
+	// Update transaction details if a tx object was provided
+	if tx != nil {
+		// Derive sender safely
+		sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+		if err != nil {
+			return fmt.Errorf("failed to derive sender: %w", err)
+		}
+		storedTx.Tx = structureTx(tx, sender)
+	}
+
+	// Marshal and store updated metadata
 	updated, err := json.Marshal(storedTx)
 	if err != nil {
 		return fmt.Errorf("error marshaling updated metadata: %w", err)
@@ -153,39 +149,6 @@ func structureTx(tx *types.Transaction, sender common.Address) model.Tx {
 	}
 
 	return txData
-}
-
-// Requeue logic with retry limit
-func (s *ClientStorage) shouldRequeueTx(ctx context.Context, tx *types.Transaction) error {
-	const maxRetries = 5
-
-	txHash := tx.Hash().Hex()
-	retryKey := fmt.Sprintf("retry:%s", txHash)
-
-	// Get current retry count
-	retryStr, err := s.rdb.Get(ctx, retryKey).Result()
-	retries := 0
-	if err == nil {
-		retries, _ = strconv.Atoi(retryStr)
-	}
-
-	if retries < maxRetries {
-		// Increment and requeue
-		if err := s.rdb.Set(ctx, retryKey, retries+1, 15*time.Minute).Err(); err != nil {
-			return fmt.Errorf("failed to set retry count: %w", err)
-		}
-		if err := s.rdb.RPush(ctx, s.StreamKey, fmt.Sprintf("%s:%s", s.client, txHash)).Err(); err != nil {
-			return fmt.Errorf("failed to requeue transaction: %w", err)
-		}
-	} else {
-		err = s.UpdateTransaction(ctx, tx, model.StatusDropped, time.Now().Unix())
-
-		if err != nil {
-			return fmt.Errorf("failed to update dropped transaction: %w", err)
-		}
-	}
-
-	return nil
 }
 
 // addToIndexes adds the transaction to various indexes for efficient filtering

@@ -35,23 +35,48 @@ func (s *InclusionListService) StreamInclusionList(ctx context.Context, beaconSs
 
 	client := dialSSEConnection(sseURL)
 
-	err := client.SubscribeRaw(func(msg *sse.Event) {
-		if len(msg.Data) == 0 {
-			s.logger.Warn("Received empty SSE event data")
-			return
-		}
+	events := make(chan *sse.Event)
+	errs := make(chan error, 1)
 
-		if err := s.handleInclusionListMessage(ctx, msg.Data); err != nil {
-			s.logger.Error("Failed to handle inclusion list message", err)
-		}
-	})
+	go func() {
+		err := client.SubscribeRaw(func(msg *sse.Event) {
+			if len(msg.Data) == 0 {
+				s.logger.Warn("Received empty SSE event data")
+				return
+			}
 
-	if err != nil {
-		s.logger.Error("Failed to subscribe to SSE stream", err)
-		return
-	}
+			select {
+			case <-ctx.Done():
+				return
+			case events <- msg:
+			}
+		})
+		errs <- err
+	}()
 
 	s.logger.Info("Successfully subscribed to SSE stream")
+
+	for {
+		select {
+		case <-ctx.Done():
+			client.Unsubscribe(events)
+			return
+
+		case event := <-events:
+			if event == nil {
+				continue
+			}
+			if err := s.handleInclusionListMessage(ctx, event.Data); err != nil {
+				s.logger.Error("Failed to handle inclusion list message", err)
+			}
+
+		case err := <-errs:
+			if err != nil {
+				s.logger.Error("SSE subscription error", err)
+			}
+			return
+		}
+	}
 }
 
 // handleInclusionListMessage processes a single inclusion list message.
@@ -91,7 +116,7 @@ func (s *InclusionListService) handleInclusionListMessage(ctx context.Context, j
 			return err
 		}
 
-		s.logger.Info("Updated inclusion list in Redis", logger.Fields{
+		s.logger.Info("Updated inclusion list", logger.Fields{
 			"slot":         slot,
 			"new_tx_count": txCount,
 		})
@@ -131,7 +156,7 @@ func (s *InclusionListService) updateInclusionScore(ctx context.Context, slot st
 // parseInclusionListMessage unmarshals the JSON inclusion list message into a MempoolMessage struct.
 func parseInclusionListMessage(jsonData []byte) (model.MempoolMessage, error) {
 	var msg model.MempoolMessage
-	
+
 	if err := json.Unmarshal(jsonData, &msg); err != nil {
 		return model.MempoolMessage{}, fmt.Errorf("error unmarshaling JSON: %w", err)
 	}
