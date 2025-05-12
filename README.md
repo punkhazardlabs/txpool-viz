@@ -23,20 +23,19 @@ Setup endpoint configs using `config.example.yaml`
 
 ```yaml
 endpoints:
-  - name: nethermind
-    rpc_url: 'http://127.0.0.1:62956'
-    socket: 'ws://127.0.0.1:62957'
   - name: geth
-    rpc_url: 'http://127.0.0.1:62945'
-    socket: 'ws://127.0.0.1:62946'
+    rpc_url: 'http://127.0.0.1:57826'
+    socket: 'ws://127.0.0.1:57827'
+  - name: nethermind
+    rpc_url: 'http://127.0.0.1:57820'
+    socket: 'ws://127.0.0.1:57821'
   - name: reth
-    rpc_url: 'http://127.0.0.1:63146'
-    socket: 'ws://127.0.0.1:63147'
+    rpc_url: 'http://127.0.0.1:57811'
+    socket: 'ws://127.0.0.1:57812'
+beacon_sse_url: 'http://127.0.0.1:52566' # FOCIL Enabled bean api endpoint. Leave blank if not needed
 polling:
-  interval: 5s
+  interval: 1s
   timeout: 5s
-filters:
-  min_gas_price: 1gwei
 ```
 
 Set up .env file from .env.example. This is for running this repo only, these variables will be setup automatically when in use with Kurtosis
@@ -44,6 +43,7 @@ Set up .env file from .env.example. This is for running this repo only, these va
 ```
 POSTGRES_URL=postgres://postgres:password@localhost:5432/postgres?sslmode=disable
 REDIS_URL=redis://localhost:6379/0
+PORT=42069
 ```
 
 Run the code
@@ -52,10 +52,10 @@ Run the code
 make run
 ```
 
-The web ui will be served on port 5173. Confirm actual port on the terminal
+The web ui will be served on port 8080
 
 ```
-http://localhost:5173
+http://localhost:8080
 ```
 
 Local Development Tools:

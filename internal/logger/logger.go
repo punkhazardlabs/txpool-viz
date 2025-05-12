@@ -207,7 +207,7 @@ func (l *logger) logEvent(event *zerolog.Event, msg string, fields ...any) {
 	// check if we have pairs of fields (key-value)
 	if len(fields) > 0 {
 		if len(fields)%2 != 0 { // odd number of fields means unpaired key-value
-			event.Interface("UNPAIRED_FIELDS", fields)
+			event.Interface("FIELDS", fields)
 		} else {
 			// process key-value pairs
 			for i := 0; i < len(fields); i += 2 {

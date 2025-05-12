@@ -150,7 +150,7 @@ func monitorQueueSize(ctx context.Context, redis *redis.Client, logger logger.Lo
 				logger.Error(fmt.Sprintf("Error getting queue length: %s", err))
 				continue
 			}
-			logger.Debug(fmt.Sprintf("Current queue size %s: %d", queue, count))
+			logger.Info(fmt.Sprintf("Current queue size %s: %d", queue, count))
 		case <-ctx.Done():
 			return
 		}
