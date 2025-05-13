@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchTransactions } from "../lib/api";
+  import { fetchTransactions, fetchTxDetails } from "../lib/api";
 
   let transactions: string[] = [];
+  let txDetails: Record<string, any> = {};
+  let selectedTx: string | null = null;
   let error: string | null = null;
 
   onMount(async () => {
@@ -12,29 +14,75 @@
       error = err.message;
     }
   });
+
+  async function showDetails(txHash: string) {
+    selectedTx = txHash;
+    if (!txDetails[txHash]) {
+      try {
+        const details = await fetchTxDetails(txHash);
+        txDetails = { ...txDetails, [txHash]: details };
+      } catch (err: any) {
+        alert(`Failed to fetch details for ${txHash}`);
+      }
+    }
+  }
 </script>
 
-<h2 class="text-2xl font-bold mb-4">Transaction Hashes</h2>
+<h2>Transaction Hashes</h2>
 
 {#if error}
-  <p class="text-red-500">{error}</p>
+  <p style="color: red">{error}</p>
 {:else if transactions.length === 0}
-  <p>Loading transactions...</p>
+  <p>Loading transactions…</p>
 {:else}
-  <table class="table-auto border-collapse border border-gray-400">
+  <table>
     <thead>
-      <tr>
-        <th class="border border-gray-400 px-4 py-2">#</th>
-        <th class="border border-gray-400 px-4 py-2">Transaction Hash</th>
-      </tr>
+      <tr><th>#</th><th>Hash</th></tr>
     </thead>
     <tbody>
       {#each transactions as tx, i}
         <tr>
-          <td class="border border-gray-400 px-4 py-2">{i + 1}</td>
-          <td class="border border-gray-400 px-4 py-2">{tx}</td>
+          <td>{i + 1}</td>
+          <td class="clickable" on:click={() => showDetails(tx)}>{tx}</td>
         </tr>
       {/each}
     </tbody>
   </table>
 {/if}
+
+{#if selectedTx}
+  <div class="pane">
+    <button on:click={() => (selectedTx = null)}>Close</button>
+    <h3>Details for {selectedTx}</h3>
+
+    {#if txDetails[selectedTx]}
+      {#each Object.entries(txDetails[selectedTx]) as [endpoint, detail]}
+        <section>
+          <strong>{endpoint}</strong>
+          <pre>{JSON.stringify(detail, null, 2)}</pre>
+        </section>
+      {/each}
+    {:else}
+      <p>Loading details…</p>
+    {/if}
+  </div>
+{/if}
+
+<style>
+  .clickable {
+    cursor: pointer;
+    color: #1e40af;
+    text-decoration: underline;
+  }
+  .pane {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 30%;
+    height: 100%;
+    background: white;
+    border-left: 1px solid #ddd;
+    padding: 1rem;
+    overflow-y: auto;
+  }
+</style>

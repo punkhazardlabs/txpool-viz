@@ -14,4 +14,5 @@ func RegisterRoutes(router *gin.Engine, handler *handler.Handler) {
 	})
 
 	router.GET("/transactions", handler.GetLatestTransactions)
+	router.GET("/transaction/:txHash", handler.GetTransactionDetails)
 }

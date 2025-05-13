@@ -172,7 +172,7 @@ func (c *Controller) setupServices() (*service.Service, error) {
 
 func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l logger.Logger) {
 	//Initialize handler with needed services
-	txService := service.NewTransactionService(ctx, r, l)
+	txService := service.NewTransactionService(ctx, r, l, c.Config.Endpoints)
 	handler := handler.NewHandler(txService)
 
 	allowedOrigins := "http://localhost:8080" // front-end port

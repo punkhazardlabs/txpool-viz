@@ -37,3 +37,21 @@ func (h *Handler) GetLatestTransactions(c *gin.Context) {
 
     c.JSON(http.StatusOK, txs)
 }
+
+func (h *Handler) GetTransactionDetails(c *gin.Context) {
+	txHash := c.Param("txHash")
+	if txHash == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing transaction hash"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	details, err := h.TxService.GetTxDetails(ctx, txHash)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, details)
+}
+
