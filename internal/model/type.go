@@ -47,3 +47,37 @@ type MempoolMessage struct {
 	Version string `json:"version"`
 	Data    Data   `json:"data"`
 }
+
+type BlockSubscriptionEvent struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  struct {
+			Subscription string  `json:"subscription"`
+			Result       NewHead `json:"result"`
+	} `json:"params"`
+}
+
+type NewHead struct {
+	ParentHash             string `json:"parentHash"`
+	Sha3Uncles             string `json:"sha3Uncles"`
+	Miner                  string `json:"miner"`
+	StateRoot              string `json:"stateRoot"`
+	TransactionsRoot       string `json:"transactionsRoot"`
+	ReceiptsRoot           string `json:"receiptsRoot"`
+	LogsBloom              string `json:"logsBloom"`
+	Difficulty             string `json:"difficulty"`
+	Number                 string `json:"number"`
+	GasLimit               string `json:"gasLimit"`
+	GasUsed                string `json:"gasUsed"`
+	Timestamp              string `json:"timestamp"`
+	ExtraData              string `json:"extraData"`
+	MixHash                string `json:"mixHash"`
+	Nonce                  string `json:"nonce"`
+	Hash                   string `json:"hash"`
+	BaseFeePerGas          string `json:"baseFeePerGas"`
+	WithdrawalsRoot        string `json:"withdrawalsRoot"`
+	BlobGasUsed            string `json:"blobGasUsed"`
+	ExcessBlobGas          string `json:"excessBlobGas"`
+	ParentBeaconBlockRoot  string `json:"parentBeaconBlockRoot"`
+	RequestsHash           string `json:"requestsHash"`
+}

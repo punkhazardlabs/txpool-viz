@@ -80,7 +80,7 @@ func (c *Controller) Serve() error {
 	go func() {
 		defer wg.Done()
 		inclusionListService := inclusion_list.NewInclusionListService(l, c.Services.Redis)
-		inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
+		inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl, c.Config.Endpoints[0].Websocket, c.Config.Endpoints[0].Client)
 	}()
 
 	// Start frontend static file server

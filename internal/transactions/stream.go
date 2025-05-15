@@ -19,6 +19,27 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type NewHead struct {
+	ParentHash       string `json:"parentHash"`
+	Sha3Uncles       string `json:"sha3Uncles"`
+	Miner            string `json:"miner"`
+	StateRoot        string `json:"stateRoot"`
+	TransactionsRoot string `json:"transactionsRoot"`
+	ReceiptsRoot     string `json:"receiptsRoot"`
+	LogsBloom        string `json:"logsBloom"`
+	Difficulty       string `json:"difficulty"`
+	Number           string `json:"number"`
+	GasLimit         string `json:"gasLimit"`
+	GasUsed          string `json:"gasUsed"`
+	Timestamp        string `json:"timestamp"`
+	ExtraData        string `json:"extraData"`
+	MixHash          string `json:"mixHash"`
+	Nonce            string `json:"nonce"`
+	Hash             string `json:"hash"`
+	BaseFeePerGas    string `json:"baseFeePerGas"`
+}
+
+
 func Stream(ctx context.Context, cfg *config.Config, srvc *service.Service, wg *sync.WaitGroup) {
 	ProcessTransactions(ctx, cfg, srvc)
 
@@ -100,7 +121,7 @@ func dialWebSocket(ctx context.Context, endpoint config.Endpoint, l logger.Logge
 		return nil, fmt.Errorf("error connecting to websocket: %s", err)
 	}
 
-	l.Debug(fmt.Sprintf("Endpoint: %s Websocket connected with repsonse %s", endpoint.Name, resp.Status))
+	l.Debug(fmt.Sprintf("Endpoint: %s Websocket connected with response %s", endpoint.Name, resp.Status))
 
 	payload := &model.RPCRequest{
 		Method:  "eth_subscribe",
