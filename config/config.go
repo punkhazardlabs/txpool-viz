@@ -11,18 +11,18 @@ import (
 )
 
 type Endpoint struct {
-	Name        string
-	RPCUrl      string            `yaml:"rpc_url"`
-	Websocket   string            `yaml:"socket"`
-	AuthHeaders map[string]string `yaml:"auth_headers"`
-	Client      *ethclient.Client
+	Name        string            `yaml:"name" json:"name"`
+	RPCUrl      string            `yaml:"rpc_url" json:"rpc_url"`
+	Websocket   string            `yaml:"socket" json:"socket"`
+	AuthHeaders map[string]string `yaml:"auth_headers" json:"auth_headers"`
+	Client      *ethclient.Client `yaml:"-" json:"-"`
 }
 
 type Config struct {
-	Endpoints    []Endpoint `yaml:"endpoints"`
-	BeaconSSEUrl string     `yaml:"beacon_sse_url"`
-	Polling      Polling    `yaml:"polling"`
-	Filters      Filters    `yaml:"filters"`
+	Endpoints    []Endpoint `yaml:"endpoints" json:"endpoints"`
+	BeaconSSEUrl string     `yaml:"beacon_sse_url" json:"beacon_sse_url"`
+	Polling      Polling    `yaml:"polling" json:"polling"`
+	Filters      Filters    `yaml:"filters" json:"filters"`
 }
 
 type Polling struct {
@@ -62,7 +62,7 @@ func Load() (*Config, error) {
 		client, err := ethclient.Dial(userConfig.Endpoints[i].RPCUrl)
 
 		if err != nil {
-			return nil, fmt.Errorf("Error connecting to client %s", userConfig.Endpoints[i].Name)
+			return nil, fmt.Errorf("Error connecting to client %s. rpc url: %s", userConfig.Endpoints[i].Name, userConfig.Endpoints[i].RPCUrl)
 		}
 
 		userConfig.Endpoints[i].Client = client

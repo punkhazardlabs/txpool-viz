@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -175,10 +174,8 @@ func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l log
 	txService := service.NewTransactionService(ctx, r, l, c.Config.Endpoints)
 	handler := handler.NewHandler(txService)
 
-	allowedOrigins := "http://localhost:8080" // front-end port
-
 	c.router.Use(cors.New(cors.Config{
-		AllowOrigins:     strings.Split(allowedOrigins, ","),
+		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST"}, // Restrict to required methods
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
 		ExposeHeaders:    []string{"Content-Length"},
