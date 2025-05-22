@@ -6,7 +6,7 @@ This project is still in development. This repo represents the core txpool-viz l
 
 [Project Plan](https://github.com/punkhazardlabs/txpool-viz/wiki)
 
-[Discord Server](https://discord.gg/hEGezqNxma)
+[Discord Server](https://discord.gg/kq6YXwCzDs)
 
 ## Introduction:
 A tool to visualize and compare transaction pools across different Ethereum execution clients. This helps debug transaction propagation issues, analyze mempool behaviors during attacks, and understand differences in transaction acceptance policies between clients.
