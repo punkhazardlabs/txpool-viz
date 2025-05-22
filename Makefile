@@ -1,27 +1,11 @@
-# Binary and Docker image config
 BINARY_NAME=txpool-viz
 IMAGE_NAME=txpool-viz
 ORG_NAME=punkhazardlabs
 TAG ?= dev
 
-# Go build
+# Go build for local
 build:
-	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME) cmd/main.go
-
-# Docker build with tag
-docker-build: build
-	docker build -t $(ORG_NAME)/$(IMAGE_NAME):$(TAG) .
-
-# Docker run with tag
-docker-run:
-	docker run --rm $(ORG_NAME)/$(IMAGE_NAME):$(TAG)
-
-# Push image to registry
-docker-push:
-	docker push $(ORG_NAME)/$(IMAGE_NAME):$(TAG)
-
-# Build and push in one step
-docker-build-push: docker-build docker-push
+	go build -o bin/$(BINARY_NAME) cmd/main.go
 
 # Clean build artifacts
 clean:
@@ -31,17 +15,36 @@ clean:
 test:
 	go test ./...
 
-# Build frontend assets (if applicable)
-build-frontend:
-	cd ./frontend && npm install && npm run build --silent
+# Tidy Go modules
+tidy:
+	go mod tidy
 
 # Run the app locally
 run-app:
 	go run cmd/main.go
 
-# Build frontend and run app
+# Build frontend assets
+build-frontend:
+	cd ./frontend && npm install && npm run build --silent
+
+# Build frontend and run app locally
 run: build-frontend run-app
 
-# Tidy Go modules
-tidy:
-	go mod tidy
+# Initialize Docker Buildx
+buildx-init:
+	docker buildx create --use --name punkhazardlabs-builder || true
+	docker buildx inspect --bootstrap
+
+# Multi-arch Docker build and push (linux/amd64 and linux/arm64)
+docker-build-push: build-frontend buildx-init
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-t $(ORG_NAME)/$(IMAGE_NAME):$(TAG) \
+		--push .
+
+# Multi-arch Docker build
+docker-build: build-frontend buildx-init
+	docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-t $(ORG_NAME)/$(IMAGE_NAME):$(TAG) \
+		--load .

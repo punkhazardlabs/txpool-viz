@@ -58,12 +58,13 @@ func (c *Controller) Serve() error {
 
 	c.configureRouter(ctx, c.Services.Redis, l)
 
-	// Start backend HTTP API server
+	// Start HTTP server
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		l.Info("Serving txpool-viz at http://localhost:" + os.Getenv("PORT"))
 		if err := c.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			l.Error("API server failed", logger.Fields{"error": err.Error()})
+			l.Error("server failed to start", logger.Fields{"error": err.Error()})
 		}
 	}()
 
@@ -82,21 +83,6 @@ func (c *Controller) Serve() error {
 		inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
 	}()
 
-	// Start frontend static file server
-	frontendServer := &http.Server{
-		Addr:    ":8080",
-		Handler: http.FileServer(http.Dir("./frontend/dist")),
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		l.Info("Serving frontend at http://localhost:8080")
-		if err := frontendServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			l.Error("Frontend server failed", logger.Fields{"error": err.Error()})
-		}
-	}()
-
 	// Wait for shutdown signal
 	<-ctx.Done()
 
@@ -104,7 +90,6 @@ func (c *Controller) Serve() error {
 
 	// Cleanly shut down HTTP servers
 	_ = c.httpServer.Shutdown(context.Background())
-	_ = frontendServer.Shutdown(context.Background())
 
 	l.Info("Waiting for background routines to finish...")
 	wg.Wait()
@@ -176,7 +161,7 @@ func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l log
 
 	c.router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST"}, // Restrict to required methods
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"}, // Restrict to required methods
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
@@ -186,10 +171,20 @@ func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l log
 	// Register all routes
 	route.RegisterRoutes(c.router, handler)
 
+	// Create a mux to serve both API and static frontend
+	mux := http.NewServeMux()
+
+	// API routes — mounted on /api/
+	mux.Handle("/api/", http.StripPrefix("/api", c.router))
+
+	// Frontend static files — mounted at /
+	fs := http.FileServer(http.Dir("./frontend/dist"))
+	mux.Handle("/", fs)
+
 	// Configure server
 	c.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%s", os.Getenv("PORT")),
-		Handler:      c.router,
+		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
