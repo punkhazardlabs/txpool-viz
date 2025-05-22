@@ -1,9 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 	_ "github.com/joho/godotenv/autoload"
@@ -19,25 +19,42 @@ type Endpoint struct {
 }
 
 type Config struct {
-	Endpoints    []Endpoint               `yaml:"endpoints"`
-	BeaconSSEUrl string                   `yaml:"beacon_sse_url"`
-	Polling      map[string]time.Duration `yaml:"polling"`
-	Filters      map[string]string        `yaml:"filters"`
+	Endpoints    []Endpoint `yaml:"endpoints"`
+	BeaconSSEUrl string     `yaml:"beacon_sse_url"`
+	Polling      Polling    `yaml:"polling"`
+	Filters      Filters    `yaml:"filters"`
+}
+
+type Polling struct {
+	Interval string `yaml:"interval" json:"interval"`
+	Timeout  string `yaml:"timeout" json:"timeout"`
+}
+
+type Filters struct {
+	MinGasPrice string `yaml:"min_gas_price" json:"min_gas_price"`
 }
 
 func Load() (*Config, error) {
 	userConfig := &Config{}
+	// Attempt to read config.yaml first
 	cfgData, err := os.ReadFile("config.yaml")
+	if err == nil {
+		err = yaml.Unmarshal(cfgData, userConfig)
+		if err != nil {
+			return nil, fmt.Errorf("Error parsing config.yaml: %v", err)
+		}
+	} else {
+		// If config.yaml is not provided the tool will check CONFIG_JSON for cluster settings
+		configJson := os.Getenv("CONFIG_JSON")
 
-	if err != nil {
-		return nil, fmt.Errorf("Error reading config file: %v", err)
-	}
+		if configJson == "" {
+			return nil, fmt.Errorf("No config.yaml found and CONFIG_JSON not set — please provide a config.yaml")
+		}
 
-	err = yaml.Unmarshal(cfgData, &userConfig)
-
-	if err != nil {
-		throwErr := fmt.Errorf("Error parsing config file: %v", err)
-		panic(throwErr)
+		err = json.Unmarshal([]byte(configJson), userConfig)
+		if err != nil {
+			return nil, fmt.Errorf("Error parsing CONFIG_JSON: %v", err)
+		}
 	}
 
 	// Create clients for the Endpoints

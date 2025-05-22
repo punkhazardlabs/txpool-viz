@@ -20,13 +20,19 @@ import (
 
 func ProcessTransactions(ctx context.Context, cfg *config.Config, srvc *service.Service) {
 	// Initialize a queue for each client
-	interval := cfg.Polling["interval"]
+	interval := cfg.Polling.Interval
 	for _, endpoint := range cfg.Endpoints {
 		go processEndpointQueue(ctx, &endpoint, srvc, interval)
 	}
 }
 
-func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *service.Service, interval time.Duration) {
+func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *service.Service, intervalString string) {
+	interval, err := time.ParseDuration(intervalString)
+
+	if err != nil {
+		srvc.Logger.Error("Error parsing endpoint interval", "error", err.Error())
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
