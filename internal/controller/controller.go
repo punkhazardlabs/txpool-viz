@@ -75,13 +75,15 @@ func (c *Controller) Serve() error {
 		transactions.Stream(ctx, c.Config, c.Services, &wg)
 	}()
 
-	// Start inclusion list SSE listener
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		inclusionListService := inclusion_list.NewInclusionListService(l, c.Services.Redis)
-		inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
-	}()
+	if c.Config.BeaconSSEUrl != "" {
+		// Start inclusion list SSE listener if url is configured
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			inclusionListService := inclusion_list.NewInclusionListService(l, c.Services.Redis)
+			inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
+		}()
+	}
 
 	// Wait for shutdown signal
 	<-ctx.Done()
