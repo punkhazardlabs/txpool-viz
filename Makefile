@@ -5,7 +5,7 @@ TAG ?= dev
 
 # Go build for local
 build:
-	go build -o bin/$(BINARY_NAME) cmd/main.go
+	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME) cmd/main.go
 
 # Clean build artifacts
 clean:
@@ -36,14 +36,14 @@ buildx-init:
 	docker buildx inspect --bootstrap
 
 # Multi-arch Docker build and push (linux/amd64 and linux/arm64)
-docker-build-push: build-frontend buildx-init
+docker-build-push: build build-frontend buildx-init
 	docker buildx build \
 		--platform linux/amd64,linux/arm64 \
 		-t $(ORG_NAME)/$(IMAGE_NAME):$(TAG) \
 		--push .
 
 # Multi-arch Docker build
-docker-build: build-frontend buildx-init
+docker-build: build build-frontend buildx-init
 	docker buildx build \
 		--platform linux/amd64,linux/arm64 \
 		-t $(ORG_NAME)/$(IMAGE_NAME):$(TAG) \

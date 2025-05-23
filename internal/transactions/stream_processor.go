@@ -18,6 +18,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	notIndexedError = "transaction indexing is in progress"
+)
+
 func ProcessTransactions(ctx context.Context, cfg *config.Config, srvc *service.Service) {
 	// Initialize a queue for each client
 	interval := cfg.Polling.Interval
@@ -101,13 +105,14 @@ func processTransaction(
 			l.Error("Error updating mined transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
-	}
-
-	if err != ethereum.NotFound {
-		l.Error("Error fetching transaction receipt", logger.Fields{"txHash": txHash, "error": err.Error()})
+	} else if (err.Error() == notIndexedError) {
+		// Requeue
+		if err := srvc.Redis.RPush(ctx, streamKey, fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
+			l.Error("Error requeuing transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
+		}
 		return
 	}
-
+	
 	// No receipt — check if it's still in mempool
 	tx, isPending, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
 	if err == ethereum.NotFound {
