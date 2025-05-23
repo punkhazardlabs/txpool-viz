@@ -15,7 +15,7 @@ A tool to visualize and compare transaction pools across different Ethereum exec
 
 This is currently in development mode. Please open an issue in this repo to report any bugs
 
-Install [Kurtosis](https://docs.kurtosis.tech)
+Install [Kurtosis](https://docs.kurtosis.com/)
 
 This tool has been added as an additional service on the [ethereum-package](https://github.com/ethpandaops/ethereum-package) for Kurtosis
 
