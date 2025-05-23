@@ -7,12 +7,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterRoutes registers the routes for the application
+// RegisterRoutes registers the API routes for the application
 func RegisterRoutes(router *gin.Engine, handler *handler.Handler) {
-	router.GET("/ping", func(ctx *gin.Context) {
+	api := router.Group("/")
+
+	api.GET("/ping", func(ctx *gin.Context) {
 		ctx.String(http.StatusOK, "pong")
 	})
 
-	router.GET("/transactions", handler.GetLatestTransactions)
-	router.GET("/transaction/:txHash", handler.GetTransactionDetails)
+	api.GET("/transactions", handler.GetLatestTransactions)
+	api.GET("/transaction/:txHash", handler.GetTransactionDetails)
 }

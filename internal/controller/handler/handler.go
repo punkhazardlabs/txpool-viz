@@ -21,21 +21,21 @@ func NewHandler(service *service.TransactionServiceImpl) *Handler {
 }
 
 func (h *Handler) GetLatestTransactions(c *gin.Context) {
-    txCountStr := c.DefaultQuery("tx_count", strconv.Itoa(DefaultTxCount))
-    txCount, err := strconv.Atoi(txCountStr)
-    if err != nil || txCount <= 0 {
-        c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid tx_count parameter"})
-        return
-    }
+	txCountStr := c.DefaultQuery("tx_count", strconv.Itoa(DefaultTxCount))
+	txCount, err := strconv.Atoi(txCountStr)
+	if err != nil || txCount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid tx_count parameter"})
+		return
+	}
 
-    ctx := c.Request.Context()
-    txs, err := h.TxService.GetLatestNTransactions(ctx, int64(txCount))
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
+	ctx := c.Request.Context()
+	txs, err := h.TxService.GetLatestNTransactions(ctx, int64(txCount))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
-    c.JSON(http.StatusOK, txs)
+	c.JSON(http.StatusOK, txs)
 }
 
 func (h *Handler) GetTransactionDetails(c *gin.Context) {
@@ -54,4 +54,3 @@ func (h *Handler) GetTransactionDetails(c *gin.Context) {
 
 	c.JSON(http.StatusOK, details)
 }
-
