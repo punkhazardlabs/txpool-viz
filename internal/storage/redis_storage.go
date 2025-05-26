@@ -98,13 +98,21 @@ func (s *ClientStorage) UpdateTransaction(
 	case model.StatusDropped:
 		storedTx.Metadata.TimeDropped = timestamp
 	case model.StatusMined:
-		storedTx.Metadata.TimeMined = timestamp
+		storedTx.Metadata.TimeMined = &timestamp
 	}
 
 	// Update transaction details if a tx object was provided
 	if tx != nil {
 		// Update time seen in mempool if not updated
-		if storedTx.Metadata.TimePending == nil {
+		if status == model.StatusMined {
+			// If pending time is nil, update it with mined time (Quick confirmation)
+			if storedTx.Metadata.TimePending == nil {
+				storedTx.Metadata.TimePending = &timestamp
+			}
+		}
+
+		// If pending, capture time sent to the mempool - post validation of the tx
+		if status == model.StatusPending {
 			localDetectionTime := tx.Time().Unix()
 			storedTx.Metadata.TimePending = &localDetectionTime
 		}

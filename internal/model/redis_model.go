@@ -33,7 +33,7 @@ type TransactionMetadata struct {
 	TimeReceived int64             `json:"time_received,omitempty"` // When seen in mempool
 	TimePending  *int64            `json:"time_pending,omitempty"`
 	TimeQueued   int64             `json:"time_queued"`
-	TimeMined    int64             `json:"time_mined"`
+	TimeMined    *int64             `json:"time_mined"`
 	TimeDropped  int64             `json:"time_dropped"`
 	BlockNumber  uint64            `json:"block_number,omitempty"`
 	BlockHash    string            `json:"block_hash,omitempty"`
