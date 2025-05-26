@@ -42,13 +42,13 @@ func NewClientStorage(client string, rdb *redis.Client, l logger.Logger) *Client
 }
 
 // StoreTransaction stores a transaction with its metadata in the specified per-client queue
-func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string, time int64) error {
+func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string, localDetectionTime int64) error {
 	// 1. Store metadata and tx data separately for efficient filtering in per client hash txpool:geth:meta { txHash: StoredTx: {Tx, TxMetadata}}
 	txMetaData := &model.StoredTransaction{
 		Hash: txHash,
 		Metadata: model.TransactionMetadata{
-			Status:       model.StatusReceived,
-			TimeReceived: time,
+			Status:            model.StatusReceived,
+			TimeReceived: localDetectionTime,
 		},
 	}
 
@@ -95,8 +95,6 @@ func (s *ClientStorage) UpdateTransaction(
 	switch status {
 	case model.StatusQueued:
 		storedTx.Metadata.TimeQueued = timestamp
-	case model.StatusPending:
-		storedTx.Metadata.TimePending = timestamp
 	case model.StatusDropped:
 		storedTx.Metadata.TimeDropped = timestamp
 	case model.StatusMined:
@@ -105,6 +103,12 @@ func (s *ClientStorage) UpdateTransaction(
 
 	// Update transaction details if a tx object was provided
 	if tx != nil {
+		// Update time seen in mempool if not updated
+		if storedTx.Metadata.TimePending == nil {
+			localDetectionTime := tx.Time().Unix()
+			storedTx.Metadata.TimePending = &localDetectionTime
+		}
+
 		// Derive sender safely
 		sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 		if err != nil {

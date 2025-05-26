@@ -58,6 +58,7 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l logger.Logg
 			l.Info("Shutting down streamEndpoint", logger.Fields{"endpoint": endpoint.Name})
 			return
 		default:
+			time := time.Now().Unix()
 			_, msg, err := conn.Read(ctx)
 
 			if err != nil {
@@ -75,7 +76,6 @@ func streamEndpoint(ctx context.Context, endpoint config.Endpoint, l logger.Logg
 			}
 
 			txHash := event.Params.TxHash
-			time := time.Now().Unix()
 
 			r.ZAddNX(ctx, redisUniversalSortedSetKey, redis.Z{
 				Score:  float64(time),
