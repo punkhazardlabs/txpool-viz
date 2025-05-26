@@ -101,18 +101,26 @@ func processTransaction(
 			return
 		}
 
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusMined, timestamp); err != nil {
+		block, err := endpoint.Client.BlockByNumber(ctx, receipt.BlockNumber)
+		if err != nil {
+			l.Error("Error fetching block details", logger.Fields{"txHash": txHash, "error": err.Error()})
+			return
+		}
+
+		blocktimestamp := block.Time()
+
+		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusMined, int64(blocktimestamp)); err != nil {
 			l.Error("Error updating mined transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
-	} else if (err.Error() == notIndexedError) {
+	} else if err.Error() == notIndexedError {
 		// Requeue
 		if err := srvc.Redis.RPush(ctx, streamKey, fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
 			l.Error("Error requeuing transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
 	}
-	
+
 	// No receipt — check if it's still in mempool
 	tx, isPending, err := endpoint.Client.TransactionByHash(ctx, common.HexToHash(txHash))
 	if err == ethereum.NotFound {

@@ -28,12 +28,12 @@ const (
 
 // TransactionMetadata contains additional metadata for filtering and grouping
 type TransactionMetadata struct {
-	Status       TransactionStatus `json:"status"`        // Custom status enum
-	IsContract   bool              `json:"is_contract"`   // Whether destination is contract
-	TimeReceived int64             `json:"time_received"` // When seen in mempool
-	TimePending  int64             `json:"time_pending"`
+	Status       TransactionStatus `json:"status"`                  // Custom status enum
+	IsContract   bool              `json:"is_contract"`             // Whether destination is contract
+	TimeReceived int64             `json:"time_received,omitempty"` // When seen in mempool
+	TimePending  *int64            `json:"time_pending,omitempty"`
 	TimeQueued   int64             `json:"time_queued"`
-	TimeMined    int64             `json:"time_mined"`
+	TimeMined    *int64             `json:"time_mined"`
 	TimeDropped  int64             `json:"time_dropped"`
 	BlockNumber  uint64            `json:"block_number,omitempty"`
 	BlockHash    string            `json:"block_hash,omitempty"`
