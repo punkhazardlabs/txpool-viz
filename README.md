@@ -19,57 +19,9 @@ Install [Kurtosis](https://docs.kurtosis.com/)
 
 This tool has been added as an additional service on the [ethereum-package](https://github.com/ethpandaops/ethereum-package) for Kurtosis
 
-Create the local config file `network_params.yaml`, and copy the following config.
-
-```yaml
-participants:
-  - el_type: geth
-    el_image: ethereum/client-go:latest
-    cl_type: lighthouse
-    cl_image: sigp/lighthouse:latest-unstable
-    vc_type: lighthouse
-    vc_image: sigp/lighthouse:latest-unstable
-    count: 3
-network_params:
-  genesis_delay: 20
-  electra_fork_epoch: 0
-  eip7805_fork_epoch: 1
-  seconds_per_slot: 6
-  num_validator_keys_per_node: 256
-additional_services:
-  - txpool_viz                      # Add txpool_viz as an additional service
-  - spamoor
-port_publisher:
-  additional_services:
-    enabled: true
-    public_port_start: 65500
-spamoor_params:
-  spammers:
-    - scenario: eoatx
-      config:
-        throughput: 10
-    - scenario: uniswap-swaps
-      config:
-        throughput: 10
-    - scenario: blob-combined
-      config:
-        throughput: 5
-txpool_viz_params:                 # Optional txpool_viz params
-  polling:
-    interval: 1s
-    timeout: 5s
-  filters:
-    min_gas_price:
-  focil_enabled: "true"
-
-```
-
-Find a complete example of [network_params.yaml](https://github.com/ethpandaops/ethereum-package/blob/main/network_params.yaml) on the ethereum-package
-
-Run the ethereum package
+Using `network_params.yaml` from this repo, run our ethereum-package fork (for development)
 
 ```bash
-# Currently running with a fork for development
 kurtosis run --enclave my-testnet github.com/punkhazardlabs/ethereum-package@ndeto/feat/add-txpool-viz --args-file network_params.yaml
 ```
 
@@ -77,6 +29,7 @@ You will see an output similar to the one below. Visit the txpool-viz url
 
 ![Sample Output](doc/output.png)
 
+Find a complete example of [network_params.yaml](https://github.com/ethpandaops/ethereum-package/blob/main/network_params.yaml) on the ethereum-package
 
 ## Standalone Setup
 

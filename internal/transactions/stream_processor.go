@@ -44,7 +44,7 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	queue := utils.RedisStreamKey(endpoint.Name)
 
 	// Launch queue monitor
-	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue, interval)
+	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue)
 
 	for {
 		select {
@@ -163,8 +163,8 @@ func processTransaction(
 	}
 }
 
-func monitorQueueSize(ctx context.Context, redis *redis.Client, l logger.Logger, queue string, interval time.Duration) {
-	ticker := time.NewTicker(time.Duration(interval) * 5) // Adjust the interval as needed later. Maybe add to config.yaml
+func monitorQueueSize(ctx context.Context, redis *redis.Client, l logger.Logger, queue string) {
+	ticker := time.NewTicker(3 * time.Second) // Queue monitor set to 3s. Might be dynamic in the future
 	defer ticker.Stop()
 
 	for {
