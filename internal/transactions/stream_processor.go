@@ -44,7 +44,7 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	queue := utils.RedisStreamKey(endpoint.Name)
 
 	// Launch queue monitor
-	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue, interval)
+	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue)
 
 	for {
 		select {
@@ -91,7 +91,8 @@ func processTransaction(
 		l.Debug("Transaction is mined", logger.Fields{
 			"txHash":      txHash,
 			"blockNumber": receipt.BlockNumber,
-			"status":      receipt.Status,
+			"status":      model.MinedTxStatus(receipt.Status).String(),
+			"endpoint":    endpoint.Name,
 		})
 
 		// fetch tx details
@@ -109,15 +110,20 @@ func processTransaction(
 
 		blocktimestamp := block.Time()
 
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusMined, int64(blocktimestamp)); err != nil {
+		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusMined, int64(blocktimestamp), &receipt.Status); err != nil {
 			l.Error("Error updating mined transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
 	} else if err.Error() == notIndexedError {
+		l.Debug("Transaction receipt not indexed yet", logger.Fields{
+			"txHash": txHash,
+			"endpoint": endpoint.Name,
+		})
 		// Requeue
 		if err := srvc.Redis.RPush(ctx, streamKey, fmt.Sprintf("%s:%s", endpoint.Name, txHash)).Err(); err != nil {
 			l.Error("Error requeuing transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
+
 		return
 	}
 
@@ -126,7 +132,7 @@ func processTransaction(
 	if err == ethereum.NotFound {
 		// Not in mempool — it's dropped
 		l.Debug("Transaction dropped", logger.Fields{"txHash": txHash})
-		if err := storage.UpdateTransaction(ctx, txHash, nil, model.StatusDropped, timestamp); err != nil {
+		if err := storage.UpdateTransaction(ctx, txHash, nil, model.StatusDropped, timestamp, nil); err != nil {
 			l.Error("Error updating dropped transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
@@ -139,14 +145,14 @@ func processTransaction(
 
 	// If in mempool and pending
 	if isPending {
-		l.Debug("Transaction is pending", logger.Fields{"txHash": txHash})
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusPending, timestamp); err != nil {
+		l.Debug("Transaction is pending", logger.Fields{"txHash": txHash, "endpoint": endpoint.Name})
+		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusPending, timestamp, nil); err != nil {
 			l.Error("Error updating pending transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 	} else {
 		// It's queued — waiting for future block (nonce/gas)
 		l.Debug("Transaction is queued", logger.Fields{"txHash": txHash})
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusQueued, timestamp); err != nil {
+		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusQueued, timestamp, nil); err != nil {
 			l.Error("Error updating queued transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 	}
@@ -157,8 +163,8 @@ func processTransaction(
 	}
 }
 
-func monitorQueueSize(ctx context.Context, redis *redis.Client, logger logger.Logger, queue string, interval time.Duration) {
-	ticker := time.NewTicker(time.Duration(interval) * 5) // Adjust the interval as needed later. Maybe add to config.yaml
+func monitorQueueSize(ctx context.Context, redis *redis.Client, l logger.Logger, queue string) {
+	ticker := time.NewTicker(3 * time.Second) // Queue monitor set to 3s. Might be dynamic in the future
 	defer ticker.Stop()
 
 	for {
@@ -166,10 +172,10 @@ func monitorQueueSize(ctx context.Context, redis *redis.Client, logger logger.Lo
 		case <-ticker.C:
 			count, err := redis.LLen(ctx, queue).Result()
 			if err != nil {
-				logger.Error(fmt.Sprintf("Error getting queue length: %s", err))
+				l.Warn(fmt.Sprintf("Error getting queue length: %s", err.Error()))
 				continue
 			}
-			logger.Info(fmt.Sprintf("Current queue size %s: %d", queue, count))
+			l.Info("Queue size checked", logger.Fields{"queue": queue, "size": count})
 		case <-ctx.Done():
 			return
 		}

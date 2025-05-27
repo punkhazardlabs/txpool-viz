@@ -23,6 +23,7 @@ type Config struct {
 	BeaconSSEUrl string     `yaml:"beacon_sse_url" json:"beacon_sse_url"`
 	Polling      Polling    `yaml:"polling" json:"polling"`
 	Filters      Filters    `yaml:"filters" json:"filters"`
+	LogLevel     string     `yaml:"log_level" json:"log_level"`
 }
 
 type Polling struct {

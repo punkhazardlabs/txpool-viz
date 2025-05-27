@@ -115,45 +115,12 @@ func (c *Controller) initialize() error {
 	}
 	c.Config = cfg
 
-	srvc, err := c.setupServices()
+	srvc, err := service.NewService(c.Config)
 	if err != nil {
 		return fmt.Errorf("failed to set up services: %w", err)
 	}
 	c.Services = srvc
 	return nil
-}
-
-func (c *Controller) setupServices() (*service.Service, error) {
-	// Initialize redis client
-	redisUrl := os.Getenv("REDIS_URL")
-	if redisUrl == "" {
-		return nil, errors.New("REDIS_URL environment variable is not set")
-	}
-
-	redisOptions, err := redis.ParseURL(redisUrl)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing REDIS_URL: %w", err)
-	}
-
-	redisClient := redis.NewClient(redisOptions)
-
-	// Wipe redis keys for a fresh instance
-	redisClient.FlushAll(context.Background())
-
-	// Initialize Postgres connection
-	conn := os.Getenv("POSTGRES_URL")
-	if conn == "" {
-		return nil, errors.New("POSTGRES_URL environment variable is not set")
-	}
-
-	// Initialize Logger
-	logger := logger.NewLogger(nil)
-
-	return &service.Service{
-		Redis:  redisClient,
-		DB:     conn, // Assuming you connect to Postgres here
-		Logger: logger,
-	}, nil
 }
 
 func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l logger.Logger) {

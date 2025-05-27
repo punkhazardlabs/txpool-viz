@@ -99,11 +99,11 @@ func NewLogger(config *LoggerConfig) Logger {
 	} else {
 		// prod: rolling file output
 		lumber = &lumberjack.Logger{
-			Filename:   config.LogFile,
+			Filename:   "./logs/prod.log",
 			MaxSize:    config.MaxSize,
 			MaxBackups: config.MaxBackups,
 			MaxAge:     config.MaxAge,
-			Compress:   config.Compress,
+			Compress:   config.Compress || true,
 		}
 
 		// Multi-writer for both file and stderr
@@ -112,12 +112,7 @@ func NewLogger(config *LoggerConfig) Logger {
 
 	zerolog.SetGlobalLevel(getZerologLevel(config.Level))
 
-	zl := zerolog.New(output).
-		With().
-		Timestamp().
-		CallerWithSkipFrameCount(4).
-		// Int("pid", os.Getpid()).
-		Logger()
+	zl := zerolog.New(output).With().CallerWithSkipFrameCount(4).Timestamp().Logger()
 
 	return &logger{
 		zl:          zl,

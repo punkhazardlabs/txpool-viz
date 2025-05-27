@@ -1,16 +1,17 @@
 endpoints:
-  - name: geth
-    rpc_url: 'http://127.0.0.1:57826'
-    socket: 'ws://127.0.0.1:57827'
-  - name: nethermind
-    rpc_url: 'http://127.0.0.1:57820'
-    socket: 'ws://127.0.0.1:57821'
-  - name: reth
-    rpc_url: 'http://127.0.0.1:57811'
-    socket: 'ws://127.0.0.1:57812'
+  - name: reth-prysm
+    rpc_url: "http://127.0.0.1:58723"
+    socket: "ws://127.0.0.1:58724"
+  - name: geth-lodestar
+    rpc_url: "http://127.0.0.1:58728"
+    socket: "ws://127.0.0.1:58729"
+  - name: nethermind-teku
+    rpc_url: "http://127.0.0.1:58733"
+    socket: "ws://127.0.0.1:58734"
 beacon_sse_url: 'http://127.0.0.1:52566' # FOCIL Enabled bean api endpoint. Leave blank if not needed
 polling:
-  interval: 1s
+  interval: 0.1s
   timeout: 5s
 filters:
   min_gas_price: 1gwei
+log_level: "info"
