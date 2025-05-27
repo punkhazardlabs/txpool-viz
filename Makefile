@@ -5,7 +5,7 @@ TAG ?= dev
 
 # Go build for local
 build:
-	GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME) cmd/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/$(BINARY_NAME) cmd/main.go
 
 # Clean build artifacts
 clean:
