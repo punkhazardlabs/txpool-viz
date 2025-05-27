@@ -2,6 +2,8 @@
 
 This project is still in development. This repo represents the core txpool-viz logic
 
+[![Docker Build and Publish](https://github.com/punkhazardlabs/txpool-viz/actions/workflows/docker.yml/badge.svg)](https://github.com/punkhazardlabs/txpool-viz/actions/workflows/docker.yml)
+
 [Original Idea Proposal](https://github.com/ethpandaops/tooling-wishlist/blob/master/open-ideas/txpool-viz.md)
 
 [Project Plan](https://github.com/punkhazardlabs/txpool-viz/wiki)
