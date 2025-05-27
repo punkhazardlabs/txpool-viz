@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -30,18 +31,31 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 	redisClient := redis.NewClient(redisOptions)
 
+	// Wipe redis keys for a fresh instance
+	redisClient.FlushAll(context.Background())
+
 	// Initialize Postgres connection
 	conn := os.Getenv("POSTGRES_URL")
 	if conn == "" {
 		return nil, fmt.Errorf("POSTGRES_URL environment variable is not set")
 	}
 
+	devEnvironment := os.Getenv("ENV") != "prod"
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = "info" // Default log level if not set
+	}
+
+	loggerConfig := &logger.LoggerConfig{
+		Development: devEnvironment,                // Use development mode if not prod,
+		Level:       logger.LogLevel(cfg.LogLevel), // Set log level from config
+	}
+
 	// Initialize Logger
-	logger := logger.NewLogger(nil)
+	logger := logger.NewLogger(loggerConfig)
 
 	return &Service{
 		Redis:  redisClient,
-		DB:     conn, // Assuming you connect to Postgres here
+		DB:     conn,
 		Logger: logger,
 	}, nil
 }

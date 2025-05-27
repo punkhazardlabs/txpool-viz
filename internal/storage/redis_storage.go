@@ -47,7 +47,7 @@ func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string, loc
 	txMetaData := &model.StoredTransaction{
 		Hash: txHash,
 		Metadata: model.TransactionMetadata{
-			Status:            model.StatusReceived,
+			Status:       model.StatusReceived,
 			TimeReceived: localDetectionTime,
 		},
 	}
@@ -74,6 +74,7 @@ func (s *ClientStorage) UpdateTransaction(
 	tx *types.Transaction,
 	status model.TransactionStatus,
 	timestamp int64,
+	minestatus *uint64,
 ) error {
 	// Fetch transaction metadata
 	val, err := s.rdb.HGet(ctx, s.MetaKey, txHash).Result()
@@ -92,6 +93,7 @@ func (s *ClientStorage) UpdateTransaction(
 
 	// Update status and timestamp
 	storedTx.Metadata.Status = status
+
 	switch status {
 	case model.StatusQueued:
 		storedTx.Metadata.TimeQueued = timestamp
@@ -109,6 +111,10 @@ func (s *ClientStorage) UpdateTransaction(
 			if storedTx.Metadata.TimePending == nil {
 				storedTx.Metadata.TimePending = &timestamp
 			}
+
+			// Check the mine status of the text (0: success, 1: failed)
+			mineStatus := model.MinedTxStatus(*minestatus)
+			storedTx.Metadata.MineStatus = mineStatus.String()
 		}
 
 		// If pending, capture time sent to the mempool - post validation of the tx
