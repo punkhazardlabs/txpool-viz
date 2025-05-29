@@ -16,5 +16,8 @@
     "svelte-check": "^4.1.6",
     "typescript": "~5.8.3",
     "vite": "^6.3.5"
+  },
+  "dependencies": {
+    "svelte-spa-router": "^4.0.1"
   }
 }

@@ -17,4 +17,5 @@ func RegisterRoutes(router *gin.Engine, handler *handler.Handler) {
 
 	api.GET("/transactions", handler.GetLatestTransactions)
 	api.GET("/transaction/:txHash", handler.GetTransactionDetails)
+	api.GET("/inclusion-lists", handler.GetInclusionLists)
 }

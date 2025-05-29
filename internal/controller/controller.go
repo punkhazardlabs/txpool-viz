@@ -80,8 +80,8 @@ func (c *Controller) Serve() error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			inclusionListService := inclusion_list.NewInclusionListService(l, c.Services.Redis)
-			inclusionListService.StreamInclusionList(ctx, c.Config.BeaconSSEUrl)
+			inclusionListsService := inclusion_list.NewInclusionListService(l, c.Services.Redis, c.Config.Endpoints[1].Websocket, c.Config.Endpoints[1].Client)
+			inclusionListsService.Stream(ctx, c.Config.BeaconSSEUrl)
 		}()
 	}
 
@@ -126,7 +126,8 @@ func (c *Controller) initialize() error {
 func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l logger.Logger) {
 	//Initialize handler with needed services
 	txService := service.NewTransactionService(ctx, r, l, c.Config.Endpoints)
-	handler := handler.NewHandler(txService)
+	ilService := service.NewInclusionListService(r, l)
+	handler := handler.NewHandler(txService, ilService)
 
 	c.router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},

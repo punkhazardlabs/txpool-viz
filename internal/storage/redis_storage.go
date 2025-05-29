@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"regexp"
 	"strings"
 	"txpool-viz/internal/logger"
@@ -67,19 +68,9 @@ func (s *ClientStorage) StoreTransaction(ctx context.Context, txHash string, loc
 	return nil
 }
 
-// Update StoredTransaction with Receipt Details
-func (s *ClientStorage) UpdateTransaction(
-	ctx context.Context,
-	txHash string,
-	tx *types.Transaction,
-	status model.TransactionStatus,
-	timestamp int64,
-	minestatus *uint64,
-) error {
-	// Fetch transaction metadata
+func (s *ClientStorage) updateStoredTx(ctx context.Context, txHash string, updateFn func(*model.StoredTransaction) error) error {
 	val, err := s.rdb.HGet(ctx, s.MetaKey, txHash).Result()
 	if err == redis.Nil {
-		// Drop that tx if it has no initial entry record
 		s.logger.Debug("Transaction metadata not found", "txHash", txHash)
 		return nil
 	} else if err != nil {
@@ -91,47 +82,10 @@ func (s *ClientStorage) UpdateTransaction(
 		return fmt.Errorf("failed to unmarshal transaction metadata: %w", err)
 	}
 
-	// Update status and timestamp
-	storedTx.Metadata.Status = status
-
-	switch status {
-	case model.StatusQueued:
-		storedTx.Metadata.TimeQueued = timestamp
-	case model.StatusDropped:
-		storedTx.Metadata.TimeDropped = timestamp
-	case model.StatusMined:
-		storedTx.Metadata.TimeMined = &timestamp
+	if err := updateFn(&storedTx); err != nil {
+		return err
 	}
 
-	// Update transaction details if a tx object was provided
-	if tx != nil {
-		// Update time seen in mempool if not updated
-		if status == model.StatusMined {
-			// If pending time is nil, update it with mined time (Quick confirmation)
-			if storedTx.Metadata.TimePending == nil {
-				storedTx.Metadata.TimePending = &timestamp
-			}
-
-			// Check the mine status of the text (0: success, 1: failed)
-			mineStatus := model.MinedTxStatus(*minestatus)
-			storedTx.Metadata.MineStatus = mineStatus.String()
-		}
-
-		// If pending, capture time sent to the mempool - post validation of the tx
-		if status == model.StatusPending {
-			localDetectionTime := tx.Time().Unix()
-			storedTx.Metadata.TimePending = &localDetectionTime
-		}
-
-		// Derive sender safely
-		sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-		if err != nil {
-			return fmt.Errorf("failed to derive sender: %w", err)
-		}
-		storedTx.Tx = structureTx(tx, sender)
-	}
-
-	// Marshal and store updated metadata
 	updated, err := json.Marshal(storedTx)
 	if err != nil {
 		return fmt.Errorf("error marshaling updated metadata: %w", err)
@@ -146,20 +100,96 @@ func (s *ClientStorage) UpdateTransaction(
 	return nil
 }
 
+func (s *ClientStorage) UpdateMinedTransaction(ctx context.Context, txHash string, tx *types.Transaction, blockTimestamp int64, receiptStatus uint64, blockNumber *big.Int, blockHash *common.Hash) error {
+	return s.updateStoredTx(ctx, txHash, func(storedTx *model.StoredTransaction) error {
+		storedTx.Metadata.Status = model.StatusMined
+		storedTx.Metadata.TimeMined = &blockTimestamp
+
+		mineStatus := model.MinedTxStatus(receiptStatus)
+		storedTx.Metadata.MineStatus = mineStatus.String()
+
+		if storedTx.Metadata.TimePending == nil {
+			storedTx.Metadata.TimePending = &blockTimestamp
+		}
+
+		if tx != nil {
+			sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+			if err != nil {
+				return fmt.Errorf("failed to derive sender: %w", err)
+			}
+			storedTx.Tx = structureTx(tx, sender)
+		}
+
+		if blockNumber != nil {
+			storedTx.Metadata.BlockNumber = blockNumber.Uint64()
+		}
+		if blockHash != nil {
+			storedTx.Metadata.BlockHash = blockHash.Hex()
+		}
+
+		return nil
+	})
+}
+
+func (s *ClientStorage) UpdatePendingTransaction(ctx context.Context, txHash string, tx *types.Transaction, timestamp int64) error {
+	return s.updateStoredTx(ctx, txHash, func(storedTx *model.StoredTransaction) error {
+		storedTx.Metadata.Status = model.StatusPending
+
+		localDetectionTime := timestamp
+		storedTx.Metadata.TimePending = &localDetectionTime
+
+		if tx != nil {
+			sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+			if err != nil {
+				return fmt.Errorf("failed to derive sender: %w", err)
+			}
+			storedTx.Tx = structureTx(tx, sender)
+		}
+		return nil
+	})
+}
+
+func (s *ClientStorage) UpdateDroppedTransaction(ctx context.Context, txHash string, timestamp int64) error {
+	return s.updateStoredTx(ctx, txHash, func(storedTx *model.StoredTransaction) error {
+		storedTx.Metadata.Status = model.StatusDropped
+		storedTx.Metadata.TimeDropped = timestamp
+		return nil
+	})
+}
+
+func (s *ClientStorage) UpdateQueuedTransaction(ctx context.Context, txHash string, tx *types.Transaction, timestamp int64) error {
+	return s.updateStoredTx(ctx, txHash, func(storedTx *model.StoredTransaction) error {
+		storedTx.Metadata.Status = model.StatusQueued
+
+		if tx != nil {
+			sender, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+			if err != nil {
+				return fmt.Errorf("failed to derive sender: %w", err)
+			}
+			storedTx.Tx = structureTx(tx, sender)
+		}
+
+		return nil
+	})
+}
+
 // extracts the core fields from types.Transaction into model.Tx
 func structureTx(tx *types.Transaction, sender common.Address) model.Tx {
+	isContractCreation := tx.To() == nil
+
 	txData := model.Tx{
-		ChainID:          tx.ChainId().String(),
-		From:             sender.Hex(),
-		Nonce:            tx.Nonce(),
-		Value:            tx.Value().String(),
-		Gas:              tx.Gas(),
-		GasPrice:         tx.GasPrice(),
-		MaxFeePerGas:     tx.GasFeeCap().String(),
-		MaxPriorityFee:   tx.GasTipCap().String(),
-		MaxFeePerBlobGas: "",
-		Data:             hex.EncodeToString(tx.Data()),
-		Type:             tx.Type(),
+		ChainID:             tx.ChainId().String(),
+		From:                sender.Hex(),
+		Nonce:               tx.Nonce(),
+		Value:               tx.Value().String(),
+		Gas:                 tx.Gas(),
+		GasPrice:            tx.GasPrice(),
+		MaxFeePerGas:        tx.GasFeeCap().String(),
+		MaxPriorityFee:      tx.GasTipCap().String(),
+		MaxFeePerBlobGas:    "",
+		Data:                hex.EncodeToString(tx.Data()),
+		Type:                tx.Type(),
+		IsContractCreation:  isContractCreation,
 	}
 
 	if tx.To() != nil {
@@ -168,6 +198,7 @@ func structureTx(tx *types.Transaction, sender common.Address) model.Tx {
 
 	return txData
 }
+
 
 // addToIndexes adds the transaction to various indexes for efficient filtering
 func (s *ClientStorage) addToIndexes(ctx context.Context, tx *model.StoredTransaction) {

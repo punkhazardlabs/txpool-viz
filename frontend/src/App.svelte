@@ -1,6 +1,7 @@
 <script lang="ts">
   import phlLogo from "./assets/phl.png";
-  import TransactionsView from "./routes/TransactionsView.svelte";
+  import Router from "svelte-spa-router";
+  import routes from "./routes";
 </script>
 
 <main>
@@ -11,8 +12,13 @@
   </div>
   <h1>txpool-viz</h1>
 
+  <nav>
+    <a href="#/">Transactions</a>
+    <a href="#/inclusion-lists">Inclusion List</a>
+  </nav>
+
   <div class="card">
-    <TransactionsView />
+    <Router {routes} />
   </div>
 </main>
 
@@ -25,5 +31,16 @@
   }
   .logo:hover {
     filter: drop-shadow(0 0 2em #580132);
+  }
+
+  nav {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  a {
+    text-decoration: none;
+    color: #580132;
+    font-weight: bold;
   }
 </style>

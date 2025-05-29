@@ -9,14 +9,16 @@ import (
 )
 
 type Handler struct {
-	TxService *service.TransactionServiceImpl
+	TxService            *service.TransactionServiceImpl
+	InclusionListService *service.InclusionListService
 }
 
 const DefaultTxCount = 1000
 
-func NewHandler(service *service.TransactionServiceImpl) *Handler {
+func NewHandler(txService *service.TransactionServiceImpl, ilService *service.InclusionListService) *Handler {
 	return &Handler{
-		TxService: service,
+		TxService:            txService,
+		InclusionListService: ilService,
 	}
 }
 
@@ -53,4 +55,16 @@ func (h *Handler) GetTransactionDetails(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, details)
+}
+
+func (h *Handler) GetInclusionLists(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	inclusionReports, err := h.InclusionListService.GetInclusionLists(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, inclusionReports)
 }
