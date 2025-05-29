@@ -110,13 +110,21 @@ func processTransaction(
 
 		blocktimestamp := block.Time()
 
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusMined, int64(blocktimestamp), &receipt.Status); err != nil {
+		if err := storage.UpdateMinedTransaction(
+			ctx,
+			txHash,
+			tx,
+			int64(blocktimestamp),
+			receipt.Status,
+			receipt.BlockNumber,
+			&receipt.BlockHash,
+		); err != nil {
 			l.Error("Error updating mined transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
 	} else if err.Error() == notIndexedError {
 		l.Debug("Transaction receipt not indexed yet", logger.Fields{
-			"txHash": txHash,
+			"txHash":   txHash,
 			"endpoint": endpoint.Name,
 		})
 		// Requeue
@@ -132,7 +140,7 @@ func processTransaction(
 	if err == ethereum.NotFound {
 		// Not in mempool — it's dropped
 		l.Debug("Transaction dropped", logger.Fields{"txHash": txHash})
-		if err := storage.UpdateTransaction(ctx, txHash, nil, model.StatusDropped, timestamp, nil); err != nil {
+		if err := storage.UpdateDroppedTransaction(ctx, txHash, timestamp); err != nil {
 			l.Error("Error updating dropped transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 		return
@@ -146,13 +154,13 @@ func processTransaction(
 	// If in mempool and pending
 	if isPending {
 		l.Debug("Transaction is pending", logger.Fields{"txHash": txHash, "endpoint": endpoint.Name})
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusPending, timestamp, nil); err != nil {
+		if err := storage.UpdatePendingTransaction(ctx, txHash, tx, timestamp); err != nil {
 			l.Error("Error updating pending transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 	} else {
 		// It's queued — waiting for future block (nonce/gas)
 		l.Debug("Transaction is queued", logger.Fields{"txHash": txHash})
-		if err := storage.UpdateTransaction(ctx, txHash, tx, model.StatusQueued, timestamp, nil); err != nil {
+		if err := storage.UpdateQueuedTransaction(ctx, txHash, tx, timestamp); err != nil {
 			l.Error("Error updating queued transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}
 	}
