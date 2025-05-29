@@ -225,9 +225,8 @@ func (s *InclusionListService) processInclusionLists(ctx context.Context) {
 			s.logger.Error("Subscription error", "err", err)
 			return
 		case header := <-headers:
-			blockNumber := new(big.Int).Sub(header.Number, big.NewInt(1)) // Subtract 1 because slot number is 1 ahead of the block number
-			s.logger.Info("New Block", "block_number", blockNumber)
-			go s.processBlock(ctx, blockNumber)
+			s.logger.Info("New Block", "block_number", header.Number.String())
+			go s.processBlock(ctx, header.Number)
 		}
 	}
 }

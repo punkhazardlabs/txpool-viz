@@ -80,7 +80,7 @@ func (c *Controller) Serve() error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			inclusionListsService := inclusion_list.NewInclusionListService(l, c.Services.Redis, c.Config.Endpoints[1].Websocket, c.Config.Endpoints[1].Client)
+			inclusionListsService := inclusion_list.NewInclusionListService(l, c.Services.Redis, c.Config.Endpoints[0].Websocket, c.Config.Endpoints[0].Client)
 			inclusionListsService.Stream(ctx, c.Config.BeaconSSEUrl)
 		}()
 	}
