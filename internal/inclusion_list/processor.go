@@ -104,9 +104,8 @@ func (ils *InclusionListService) streamBeaconUrl(ctx context.Context, endpoint c
 func (ils *InclusionListService) handleInclusionListMessage(ctx context.Context, jsonData []byte) error {
 	msg, err := parseInclusionListMessage(jsonData)
 	if err != nil {
-		ils.logger.Error("Failed to parse inclusion list message", logger.Fields{
+		ils.logger.Error("Failed to parse inclusion list message; ignoring IL broadcast", logger.Fields{
 			"error": err,
-			"data":  string(jsonData),
 		})
 		return err
 	}
@@ -240,14 +239,14 @@ func (ils *InclusionListService) processClientInclusionList(ctx context.Context,
 			ils.logger.Error("Subscription error", "err", err)
 			return
 		case header := <-headers:
-			ils.logger.Info("New Block", "block_number", header.Number.String())
+			ils.logger.Info("New Block", "block_number", header.Number.String(), "client", endpoint.Name)
 			wg.Add(1)
-			go ils.processBlock(ctx, client, header.Number)
+			go ils.processBlock(ctx, client, header.Number, endpoint.Name)
 		}
 	}
 }
 
-func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *ethclient.Client, blockNumber *big.Int) {
+func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *ethclient.Client, blockNumber *big.Int, endpointName string) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -259,7 +258,7 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 		// Fetch full block
 		block, err := ethClient.BlockByNumber(ctx, blockNumber)
 		if err != nil {
-			ils.logger.Error("Failed to fetch block", "blockNumber", blockNumber, "err", err)
+			ils.logger.Error("Failed to fetch block", "blockNumber", blockNumber, "err", err, "endpoint", endpointName)
 			return
 		}
 
@@ -273,7 +272,7 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 		slotKey := utils.RedisInclusionListTxnsKey()
 		ilTxData, err := ils.redis.HGet(ctx, slotKey, blockNumber.String()).Result()
 		if err != nil {
-			ils.logger.Warn("Failed to get inclusion list", "slotKey", slotKey, "err", err.Error(), "blocknumber", blockNumber)
+			ils.logger.Warn("No Inclusion list for current block", "err", err.Error(), "blocknumber", blockNumber)
 			return
 		}
 
@@ -305,6 +304,16 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 		inclusionReportKey := utils.RedisInclusionListReportKey()
 		slot := blockNumber.String()
 
+		exists, err := ils.redis.HExists(ctx, inclusionReportKey, slot).Result()
+		if err != nil {
+			ils.logger.Error("Failed to check existing inclusion report", "err", err.Error())
+			return
+		}
+		if exists {
+			ils.logger.Info("Inclusion report already exists, skipping", "blockNumber", blockNumber, "client", endpointName)
+			return
+		}
+
 		report := model.InclusionReport{
 			Included: included,
 			Missing:  missing,
@@ -317,13 +326,13 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 
 		reportJSON, err := json.Marshal(report)
 		if err != nil {
-			ils.logger.Error("Failed to marshal inclusion report", "err", err)
+			ils.logger.Error("Failed to marshal inclusion report", "err", err.Error(), "blockNumber", blockNumber, "client", endpointName, "slot", slot)
 			return
 		}
 
 		// Store in hash under slot field
 		if err := ils.redis.HSet(ctx, inclusionReportKey, slot, reportJSON).Err(); err != nil {
-			ils.logger.Error("Failed to store inclusion report in hash", "err", err)
+			ils.logger.Error("Failed to store inclusion report in hash", "err", err, "client", endpointName, "slot", slot)
 		}
 	}
 }
