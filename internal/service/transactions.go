@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"txpool-viz/config"
+	"txpool-viz/internal/config"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/utils"

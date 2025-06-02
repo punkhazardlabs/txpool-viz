@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"txpool-viz/config"
+	"txpool-viz/internal/config"
 	"txpool-viz/internal/logger"
 
 	"github.com/redis/go-redis/v9"

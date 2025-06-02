@@ -1,8 +1,9 @@
-config.yaml
+cfg/config.yaml
 bin/*
 .env
 .DS_Store
 logs
+
 
 # Logs
 frontend/logs
@@ -14,6 +15,7 @@ frontend/pnpm-debug.log*
 frontend/lerna-debug.log*
 
 frontend/node_modules
+frontend/pkg
 frontend/dist
 frontend/dist-ssr
 frontend/*.local

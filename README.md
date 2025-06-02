@@ -41,7 +41,7 @@ Clone the repo
 git clone https://github.com/punkhazardlabs/txpool-viz.git && cd txpool-viz
 ```
 
-Setup endpoint configs `config.yaml` from the provided template `config.example.yaml`
+Setup endpoint configs `cfg/config.yaml` from the provided template `cfg/config.example.yaml`
 
 ```yaml
 endpoints:

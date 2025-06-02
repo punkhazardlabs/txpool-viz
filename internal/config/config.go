@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -18,12 +17,18 @@ type Endpoint struct {
 	Client      *ethclient.Client `yaml:"-" json:"-"`
 }
 
+type BeaconEndpoint struct {
+	Name      string `yaml:"name" json:"name"`
+	BeaconUrl string `yaml:"beacon_url" json:"beacon_url"`
+}
+
 type Config struct {
-	Endpoints    []Endpoint `yaml:"endpoints" json:"endpoints"`
-	BeaconSSEUrl string     `yaml:"beacon_sse_url" json:"beacon_sse_url"`
-	Polling      Polling    `yaml:"polling" json:"polling"`
-	Filters      Filters    `yaml:"filters" json:"filters"`
-	LogLevel     string     `yaml:"log_level" json:"log_level"`
+	Endpoints    []Endpoint       `yaml:"endpoints" json:"endpoints"`
+	BeaconUrls   []BeaconEndpoint `yaml:"beacon_urls" json:"beacon_urls"`
+	Polling      Polling          `yaml:"polling" json:"polling"`
+	Filters      Filters          `yaml:"filters" json:"filters"`
+	LogLevel     string           `yaml:"log_level" json:"log_level"`
+	FocilEnabled string           `yaml:"focil_enabled" json:"focil_enabled"`
 }
 
 type Polling struct {
@@ -38,23 +43,11 @@ type Filters struct {
 func Load() (*Config, error) {
 	userConfig := &Config{}
 	// Attempt to read config.yaml first
-	cfgData, err := os.ReadFile("config.yaml")
+	cfgData, err := os.ReadFile("cfg/config.yaml")
 	if err == nil {
 		err = yaml.Unmarshal(cfgData, userConfig)
 		if err != nil {
-			return nil, fmt.Errorf("Error parsing config.yaml: %v", err)
-		}
-	} else {
-		// If config.yaml is not provided the tool will check CONFIG_JSON for cluster settings
-		configJson := os.Getenv("CONFIG_JSON")
-
-		if configJson == "" {
-			return nil, fmt.Errorf("No config.yaml found and CONFIG_JSON not set — please provide a config.yaml")
-		}
-
-		err = json.Unmarshal([]byte(configJson), userConfig)
-		if err != nil {
-			return nil, fmt.Errorf("Error parsing CONFIG_JSON: %v", err)
+			return nil, fmt.Errorf("Error parsing config.yaml: %v", err.Error())
 		}
 	}
 
