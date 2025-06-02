@@ -1,17 +1,24 @@
 endpoints:
   - name: reth-prysm
-    rpc_url: "http://127.0.0.1:58723"
-    socket: "ws://127.0.0.1:58724"
+    rpc_url: "http://127.0.0.1:55405"
+    socket: "ws://127.0.0.1:55401"
   - name: geth-lodestar
-    rpc_url: "http://127.0.0.1:58728"
-    socket: "ws://127.0.0.1:58729"
+    rpc_url: "http://127.0.0.1:55398"
+    socket: "ws://127.0.0.1:55399"
   - name: nethermind-teku
-    rpc_url: "http://127.0.0.1:58733"
-    socket: "ws://127.0.0.1:58734"
-beacon_sse_url: 'http://127.0.0.1:52566' # FOCIL Enabled bean api endpoint. Leave blank if not needed
+    rpc_url: "http://127.0.0.1:55393"
+    socket: "ws://127.0.0.1:55394"
 polling:
   interval: 0.1s
   timeout: 5s
 filters:
   min_gas_price: 1gwei
 log_level: "info"
+focil_enabled: "true"
+beacon_urls: # FOCIL Enabled bean api endpoint. Leave blank if not needed
+  - name: reth-prysm
+    beacon_url: "http://127.0.0.1:55410"
+  - name: geth-lodestar
+    beacon_url: "http://127.0.0.1:55426"
+  - name: nethermind-teku 
+    beacon_url: "http://127.0.0.1:55652"

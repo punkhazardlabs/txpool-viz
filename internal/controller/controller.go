@@ -75,13 +75,13 @@ func (c *Controller) Serve() error {
 		transactions.Stream(ctx, c.Config, c.Services, &wg)
 	}()
 
-	if c.Config.BeaconSSEUrl != "" {
+	if c.Config.FocilEnabled == "true" {
 		// Start inclusion list SSE listener if url is configured
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			inclusionListsService := inclusion_list.NewInclusionListService(l, c.Services.Redis, c.Config.Endpoints[0].Websocket, c.Config.Endpoints[0].Client)
-			inclusionListsService.Stream(ctx, c.Config.BeaconSSEUrl)
+			inclusionListsService := inclusion_list.NewInclusionListService(l, c.Services.Redis)
+			inclusionListsService.Stream(ctx, c.Config.Endpoints, c.Config.BeaconUrls)
 		}()
 	}
 
