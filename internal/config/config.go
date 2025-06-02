@@ -43,7 +43,7 @@ type Filters struct {
 func Load() (*Config, error) {
 	userConfig := &Config{}
 	// Attempt to read config.yaml first
-	cfgData, err := os.ReadFile("config.yaml")
+	cfgData, err := os.ReadFile("/cfg/config.yaml")
 	if err == nil {
 		err = yaml.Unmarshal(cfgData, userConfig)
 		if err != nil {

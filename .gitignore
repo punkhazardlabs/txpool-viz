@@ -1,8 +1,9 @@
-config.yaml
+cfg/config.yaml
 bin/*
 .env
 .DS_Store
 logs
+
 
 # Logs
 frontend/logs

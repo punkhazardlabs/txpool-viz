@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"txpool-viz/config"
+	"txpool-viz/internal/config"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/internal/service"

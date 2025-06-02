@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"txpool-viz/config"
+	"txpool-viz/internal/config"
 	"txpool-viz/internal/controller/handler"
 	route "txpool-viz/internal/controller/routes"
 	"txpool-viz/internal/inclusion_list"

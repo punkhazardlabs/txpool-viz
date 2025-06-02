@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"txpool-viz/config"
+	"txpool-viz/internal/config"
 	"txpool-viz/internal/controller"
 	"txpool-viz/internal/service"
 )

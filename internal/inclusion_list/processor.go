@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
-	"txpool-viz/config"
+	"txpool-viz/internal/config"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/model"
 	"txpool-viz/utils"
