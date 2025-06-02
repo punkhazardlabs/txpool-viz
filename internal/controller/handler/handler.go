@@ -13,7 +13,7 @@ type Handler struct {
 	InclusionListService *service.InclusionListService
 }
 
-const DefaultTxCount = 1000
+const DefaultTxCount = 100000
 
 func NewHandler(txService *service.TransactionServiceImpl, ilService *service.InclusionListService) *Handler {
 	return &Handler{
