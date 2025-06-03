@@ -1,16 +1,16 @@
 participants:
   - el_type: geth
-    el_image: jihoonsg/geth-focil:6d6c343
+    el_image: jihoonsg/geth-focil:9f03028
     cl_type: prysm
-    cl_image: jihoonsg/prysm-beacon-chain-focil:5f778b9
+    cl_image: jihoonsg/prysm-beacon-chain-focil:9d26fe2
     vc_type: prysm
-    vc_image: jihoonsg/prysm-validator-focil:5f778b9
+    vc_image: jihoonsg/prysm-validator-focil:9d26fe2
   - el_type: geth
-    el_image: jihoonsg/geth-focil:6d6c343
+    el_image: jihoonsg/geth-focil:9f03028
     cl_type: lodestar
     cl_image: ethpandaops/lodestar:focil
   - el_type: geth
-    el_image: jihoonsg/geth-focil:6d6c343
+    el_image: jihoonsg/geth-focil:9f03028
     cl_type: teku
     cl_image: ethpandaops/teku:focil
 network_params:
@@ -20,7 +20,7 @@ network_params:
   seconds_per_slot: 6
   num_validator_keys_per_node: 256
 additional_services:
-  - txpool_viz
+  # - txpool_viz
   - spamoor
 port_publisher:
   additional_services:
