@@ -14,7 +14,7 @@
 
   <nav>
     <a href="#/">Transactions</a>
-    <a href="#/inclusion-lists">Inclusion List</a>
+    <a href="#/inclusion-lists">FOCIL</a>
   </nav>
 
   <div class="card">

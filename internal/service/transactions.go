@@ -26,38 +26,78 @@ func NewTransactionService(ctx context.Context, r *redis.Client, l logger.Logger
 	}
 }
 
-func (ts *TransactionServiceImpl) GetLatestNTransactions(ctx context.Context, n int64) ([]string, error) {
+func (ts *TransactionServiceImpl) GetLatestNTransactions(ctx context.Context, n int64) ([]model.ApiTxResponse, error) {
 	start := -n
 	stop := int64(-1)
 
 	results, err := ts.redis.ZRangeWithScores(ctx, utils.RedisUniversalKey(), start, stop).Result()
 	if err != nil {
-		ts.logger.Error("Redis ZRangeWithScores failed", err)
+		ts.logger.Error("Redis ZRangeWithScores failed", "error", err)
 		return nil, err
 	}
 
-	var hashes []string
+	var transactions []model.ApiTxResponse
 	for _, z := range results {
-		hashes = append(hashes, z.Member.(string))
+		txHash := z.Member.(string)
+
+		txDetails, err := ts.GetTxDetails(ctx, txHash)
+		if err != nil {
+			ts.logger.Error("Couldn't get tx details", "txHash", txHash, "error", err)
+			continue
+		}
+
+		transactions = append(transactions, txDetails)
 	}
 
-	return hashes, nil
+	return transactions, nil
 }
 
-func (ts *TransactionServiceImpl) GetTxDetails(ctx context.Context, txHash string) (map[string]model.StoredTransaction, error) {
-	res := make(map[string]model.StoredTransaction)
-	// for each endpoint, retrieve the specific record
+func (ts *TransactionServiceImpl) GetLatestTxSummaries(ctx context.Context, n int64) ([]model.TxSummary, error) {
+	txs, err := ts.GetLatestNTransactions(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+
+	primary := ts.endpoints[0].Name
+	metaKey := utils.RedisClientMetaKey(primary)
+
+	var out []model.TxSummary
+	for _, tx := range txs {
+		raw, err := ts.redis.HGet(ctx, metaKey, tx.Hash).Result()
+		if err != nil {
+			continue
+		}
+		var stx model.StoredTransaction
+		if err := json.Unmarshal([]byte(raw), &stx); err != nil {
+			continue
+		}
+		tx := stx.Tx
+		// parse strings to float64
+
+		out = append(out, model.TxSummary{
+			Hash:    stx.Hash,
+			From:    tx.From,
+			GasUsed: float64(stx.Metadata.GasUsed),
+			Nonce:   tx.Nonce,
+			Type:    tx.String(),
+		})
+	}
+	return out, nil
+}
+
+func (ts *TransactionServiceImpl) GetTxDetails(ctx context.Context, txHash string) (model.ApiTxResponse, error) {
+	raw := make(map[string]model.StoredTransaction, len(ts.endpoints))
 	for _, endpoint := range ts.endpoints {
 		metaKey := utils.RedisClientMetaKey(endpoint.Name)
 
-		// retrieve the record
-		val, err := ts.redis.HGet(ctx, metaKey, txHash).Result()
+		// retrieve per client record
+		val, err := ts.redis.HGet(context.Background(), metaKey, txHash).Result()
 		if err != nil {
 			if err == redis.Nil {
 				ts.logger.Debug("No record for %s in %s\n", txHash, metaKey)
 				continue
 			}
-			ts.logger.Error("Redis error: %v\n", err)
+			ts.logger.Error("Redis error", "error", err.Error())
 			continue
 		}
 
@@ -66,11 +106,43 @@ func (ts *TransactionServiceImpl) GetTxDetails(ctx context.Context, txHash strin
 		err = json.Unmarshal([]byte(val), &storedTx)
 		if err != nil {
 			ts.logger.Error("Failed to unmarshal transaction: %v\n", err)
-			return nil, err
+			return model.ApiTxResponse{}, err
 		}
 
-		res[endpoint.Name] = storedTx
+		raw[endpoint.Name] = storedTx
 	}
 
-	return res, nil
+	// flatten each into maps
+	txMaps := make(map[string]map[string]interface{}, len(raw))
+	metaMaps := make(map[string]map[string]interface{}, len(raw))
+	for client, stx := range raw {
+		txMaps[client] = toMapTx(stx.Tx)
+		metaMaps[client] = toMapMeta(stx.Metadata)
+	}
+
+	first := ts.endpoints[0].Name
+
+	txRes := Compute(txMaps, first)
+	metaRes := Compute(metaMaps, first)
+
+	// assemble clients
+	clients := make([]string, len(ts.endpoints))
+	for i, ep := range ts.endpoints {
+		clients[i] = ep.Name
+	}
+
+	resp := model.ApiTxResponse{
+		Hash:    txHash,
+		Clients: clients,
+		Common: model.TxBlock{
+			Tx:       txRes.Common,
+			Metadata: metaRes.Common,
+		},
+		Diff: model.TxDiff{
+			Tx:       txRes.Diff,
+			Metadata: metaRes.Diff,
+		},
+	}
+
+	return resp, nil
 }

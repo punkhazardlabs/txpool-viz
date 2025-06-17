@@ -22,7 +22,7 @@ func NewHandler(txService *service.TransactionServiceImpl, ilService *service.In
 	}
 }
 
-func (h *Handler) GetLatestTransactions(c *gin.Context) {
+func (h *Handler) GetLatestTxSummaries(c *gin.Context) {
 	txCountStr := c.DefaultQuery("tx_count", strconv.Itoa(DefaultTxCount))
 	txCount, err := strconv.Atoi(txCountStr)
 	if err != nil || txCount <= 0 {
@@ -31,7 +31,7 @@ func (h *Handler) GetLatestTransactions(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	txs, err := h.TxService.GetLatestNTransactions(ctx, int64(txCount))
+	txs, err := h.TxService.GetLatestTxSummaries(ctx, int64(txCount))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -67,4 +67,9 @@ func (h *Handler) GetInclusionLists(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, inclusionReports)
+}
+
+func (h *Handler) GetFocilFeatureFlag(c *gin.Context) {
+    enabled := h.InclusionListService.IsFocilEnabled()
+    c.JSON(http.StatusOK, gin.H{"status": enabled})
 }

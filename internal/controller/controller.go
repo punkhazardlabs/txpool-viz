@@ -14,7 +14,7 @@ import (
 	"txpool-viz/internal/config"
 	"txpool-viz/internal/controller/handler"
 	route "txpool-viz/internal/controller/routes"
-	"txpool-viz/internal/inclusion_list"
+	"txpool-viz/internal/focil"
 	"txpool-viz/internal/logger"
 	"txpool-viz/internal/service"
 	"txpool-viz/internal/transactions"
@@ -80,7 +80,7 @@ func (c *Controller) Serve() error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			inclusionListsService := inclusion_list.NewInclusionListService(l, c.Services.Redis)
+			inclusionListsService := focil.NewFocilService(l, c.Services.Redis)
 			inclusionListsService.Stream(ctx, c.Config.Endpoints, c.Config.BeaconUrls)
 		}()
 	}
@@ -126,7 +126,7 @@ func (c *Controller) initialize() error {
 func (c *Controller) configureRouter(ctx context.Context, r *redis.Client, l logger.Logger) {
 	//Initialize handler with needed services
 	txService := service.NewTransactionService(ctx, r, l, c.Config.Endpoints)
-	ilService := service.NewInclusionListService(r, l)
+	ilService := service.NewInclusionListService(r, l, c.Config.FocilEnabled == "true")
 	handler := handler.NewHandler(txService, ilService)
 
 	c.router.Use(cors.New(cors.Config{

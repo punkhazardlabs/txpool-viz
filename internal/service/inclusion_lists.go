@@ -15,12 +15,14 @@ import (
 type InclusionListService struct {
 	redis  *redis.Client
 	logger logger.Logger
+	enabled bool
 }
 
-func NewInclusionListService(r *redis.Client, l logger.Logger) *InclusionListService {
+func NewInclusionListService(r *redis.Client, l logger.Logger, focilEnabled bool) *InclusionListService {
 	return &InclusionListService{
 		redis:  r,
 		logger: l,
+		enabled: focilEnabled,
 	}
 }
 
@@ -58,4 +60,9 @@ func (il *InclusionListService) GetInclusionLists(ctx context.Context) ([]model.
 	})
 
 	return sortedReports, nil
+}
+
+// IsFocilEnabled checks if the Focil feature is enabled
+func (il *InclusionListService) IsFocilEnabled() bool {
+	return il.enabled
 }

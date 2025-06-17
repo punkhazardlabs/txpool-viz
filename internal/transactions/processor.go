@@ -118,6 +118,7 @@ func processTransaction(
 			receipt.Status,
 			receipt.BlockNumber,
 			&receipt.BlockHash,
+			&receipt.GasUsed,
 		); err != nil {
 			l.Error("Error updating mined transaction", logger.Fields{"txHash": txHash, "error": err.Error()})
 		}

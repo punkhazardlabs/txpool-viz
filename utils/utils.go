@@ -11,14 +11,18 @@ import (
 // getTransactionType determines the type of transaction
 func GetTransactionType(tx *types.Transaction) model.TransactionType {
 	switch {
-	case tx.Type() == types.BlobTxType:
-		return model.BlobTx
-	case tx.Type() == types.DynamicFeeTxType:
-		return model.EIP1559Tx
+	case tx.Type() == types.LegacyTxType:
+		return model.LegacyTxType
 	case tx.Type() == types.AccessListTxType:
-		return model.EIP2930Tx
+		return model.AccessListTxType
+	case tx.Type() == types.DynamicFeeTxType:
+		return model.DynamicFeeTxType
+	case tx.Type() == types.BlobTxType:
+		return model.BlobTxType
+	case tx.Type() == types.SetCodeTxType:
+		return model.SetCodeTxType
 	default:
-		return model.LegacyTx
+		return model.LegacyTxType
 	}
 }
 
