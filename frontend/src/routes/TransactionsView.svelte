@@ -57,7 +57,7 @@
 
     {#if txDetails[selectedTx]}
       {#each Object.entries(txDetails[selectedTx]) as [endpoint, detail]}
-        <section>
+        <section class="details-pane">
           <strong>{endpoint}</strong>
           <pre>{JSON.stringify(detail, null, 2)}</pre>
         </section>
@@ -84,5 +84,11 @@
     border-left: 1px solid #ddd;
     padding: 1rem;
     overflow-y: auto;
+  }
+  .details-pane{
+    background: var(--background-light);
+    @media (prefers-color-scheme: dark) {
+    background: var(--background-dark);
+  }
   }
 </style>
