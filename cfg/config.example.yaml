@@ -14,7 +14,7 @@ polling:
 filters:
   min_gas_price: 1gwei
 log_level: "info"
-focil_enabled: "true"
+focil_enabled: "false"
 beacon_urls: # FOCIL Enabled beacon api endpoint. Leave blank if not needed
   - name: reth-prysm
     beacon_url: "http://127.0.0.1:55410"
