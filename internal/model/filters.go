@@ -37,13 +37,6 @@ type GroupingCriteria struct {
 	} `json:"nonce_ranges,omitempty"`
 }
 
-// StoredTransaction represents a transaction with its metadata
-type StoredTransaction struct {
-	Hash     string              `json:"hash"`
-	Tx       Tx                  `json:"tx"`
-	Metadata TransactionMetadata `json:"metadata"`
-}
-
 // GroupedTransactions represents the result of grouping transactions
 type GroupedTransactions struct {
 	Groups map[string][]StoredTransaction `json:"groups"`

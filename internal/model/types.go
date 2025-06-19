@@ -29,12 +29,46 @@ func (ms MinedTxStatus) String() string {
 type TransactionType int
 
 const (
-	LegacyTx TransactionType = iota
-	EIP1559Tx
-	BlobTx
-	EIP2930Tx
-	EIP7702Tx
+	LegacyTxType TransactionType = iota
+	AccessListTxType
+	DynamicFeeTxType
+	BlobTxType
+	SetCodeTxType
 )
+
+func (t TransactionType) String() string {
+	switch t {
+	case LegacyTxType:
+		return "LegacyTxType"
+	case AccessListTxType:
+		return "AccessListTxType"
+	case DynamicFeeTxType:
+		return "DynamicFeeTxType"
+	case BlobTxType:
+		return "BlobTxType"
+	case SetCodeTxType:
+		return "SetCodeTxType"
+	default:
+		return "unknown"
+	}
+}
+
+func (t Tx) String() string {
+	switch t.Type {
+	case 0:
+		return "LegacyTxType"
+	case 1:
+		return "AccessListTxType"
+	case 2:
+		return "DynamicFeeTxType"
+	case 3:
+		return "BlobTxType"
+	case 4:
+		return "SetCodeTxType"
+	default:
+		return "unknown"
+	}
+}
 
 // TransactionStatus represents the current state of a transaction
 type TransactionStatus string
@@ -58,6 +92,7 @@ type TransactionMetadata struct {
 	BlockNumber  uint64            `json:"block_number"`
 	BlockHash    string            `json:"block_hash"`
 	MineStatus   string            `json:"mine_status"`
+	GasUsed      uint64            `json:"gasUsed"`
 }
 
 type Tx struct {
@@ -74,6 +109,37 @@ type Tx struct {
 	MaxFeePerBlobGas   string   `json:"max_fee_per_blob_gas,omitempty"`
 	Data               string   `json:"data,omitempty"`
 	Type               uint8    `json:"type"`
+}
+
+// StoredTransaction represents a transaction with its metadata
+type StoredTransaction struct {
+	Hash     string              `json:"hash"`
+	Tx       Tx                  `json:"tx"`
+	Metadata TransactionMetadata `json:"metadata"`
+}
+type TxDiff struct {
+	Tx       map[string]map[string]interface{} `json:"tx"`
+	Metadata map[string]map[string]interface{} `json:"metadata"`
+}
+type TxBlock struct {
+	Tx       map[string]interface{} `json:"tx"`
+	Metadata map[string]interface{} `json:"metadata"`
+}
+
+type ApiTxResponse struct {
+	Hash    string   `json:"hash"`
+	Clients []string `json:"clients"`
+	Diff    TxDiff   `json:"diff"`
+	Common  TxBlock  `json:"common"`
+}
+
+type TxSummary struct {
+	Hash    string  `json:"hash"`
+	From    string  `json:"from"`
+	Value   string  `json:"value"`
+	GasUsed float64 `json:"gasUsed"`
+	Nonce   uint64  `json:"nonce"`
+	Type    string  `json:"type"`
 }
 
 type RPCRequest struct {

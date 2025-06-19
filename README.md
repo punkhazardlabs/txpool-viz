@@ -31,7 +31,17 @@ You will see an output similar to the one below. Visit the txpool-viz url
 
 ![Sample Output](doc/output.png)
 
-Find a complete example of [network_params.yaml](https://github.com/ethpandaops/ethereum-package/blob/main/network_params.yaml) on the ethereum-package
+Find a complete spec of [network_params.yaml](https://github.com/ethpandaops/ethereum-package?tab=readme-ov-file#configuration) config on the ethereum-package
+
+### [FOCIL](https://eips.ethereum.org/EIPS/eip-7805) - Visualization
+
+Use the `focil_params.yaml` config file and run with Kurtosis
+
+```bash
+kurtosis run --enclave my-testnet github.com/punkhazardlabs/ethereum-package@ndeto/feat/add-txpool-viz --args-file focil_params.yaml
+```
+
+Visit the web UI to see the visualization.
 
 ## Standalone Setup
 
@@ -45,19 +55,29 @@ Setup endpoint configs `cfg/config.yaml` from the provided template `cfg/config.
 
 ```yaml
 endpoints:
-  - name: geth
-    rpc_url: 'http://127.0.0.1:57826'
-    socket: 'ws://127.0.0.1:57827'
-  - name: nethermind
-    rpc_url: 'http://127.0.0.1:57820'
-    socket: 'ws://127.0.0.1:57821'
-  - name: reth
-    rpc_url: 'http://127.0.0.1:57811'
-    socket: 'ws://127.0.0.1:57812'
-beacon_sse_url: 'http://127.0.0.1:52566' # FOCIL Enabled bean api endpoint. Leave blank if not needed
+  - name: reth-prysm
+    rpc_url: "http://127.0.0.1:55405"
+    socket: "ws://127.0.0.1:55401"
+  - name: geth-lodestar
+    rpc_url: "http://127.0.0.1:55398"
+    socket: "ws://127.0.0.1:55399"
+  - name: nethermind-teku
+    rpc_url: "http://127.0.0.1:55393"
+    socket: "ws://127.0.0.1:55394"
 polling:
-  interval: 1s
+  interval: 0.1s
   timeout: 5s
+filters:
+  min_gas_price: 1gwei
+log_level: "info"
+focil_enabled: "false"  # Only use if your network is FOCIL enabled (https://eips.ethereum.org/EIPS/eip-7805)
+beacon_urls: # Only used if focil_enabled = "true". 
+  - name: reth-prysm
+    beacon_url: "http://127.0.0.1:55410"
+  - name: geth-lodestar
+    beacon_url: "http://127.0.0.1:55426"
+  - name: nethermind-teku 
+    beacon_url: "http://127.0.0.1:55652"
 ```
 
 Setup storage instances by running the docker-compose file

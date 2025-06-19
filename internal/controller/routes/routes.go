@@ -15,7 +15,8 @@ func RegisterRoutes(router *gin.Engine, handler *handler.Handler) {
 		ctx.String(http.StatusOK, "pong")
 	})
 
-	api.GET("/transactions", handler.GetLatestTransactions)
+	api.GET("/transactions", handler.GetLatestTxSummaries)
 	api.GET("/transaction/:txHash", handler.GetTransactionDetails)
 	api.GET("/inclusion-lists", handler.GetInclusionLists)
+	api.GET("/feature/focil", handler.GetFocilFeatureFlag)
 }

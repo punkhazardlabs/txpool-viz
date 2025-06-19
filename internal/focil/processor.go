@@ -1,4 +1,4 @@
-package inclusion_list
+package focil
 
 import (
 	"context"
@@ -19,37 +19,37 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// InclusionListService encapsulates the logger and Redis client.
-type InclusionListService struct {
+// FocilService encapsulates the logger and Redis client.
+type FocilService struct {
 	logger logger.Logger
 	redis  *redis.Client
 }
 
-// NewInclusionListService constructs a new InclusionListService instance.
-func NewInclusionListService(l logger.Logger, r *redis.Client) *InclusionListService {
-	return &InclusionListService{
+// NewFocilService constructs a new InclusionListService instance.
+func NewFocilService(l logger.Logger, r *redis.Client) *FocilService {
+	return &FocilService{
 		logger: l,
 		redis:  r,
 	}
 }
 
-// StreamInclusionList connects to the Beacon SSE stream and processes inclusion list events.
-func (ils *InclusionListService) Stream(ctx context.Context, endpoints []config.Endpoint, beaconEndpoints []config.BeaconEndpoint) {
+// Stream connects to the Beacon SSE stream and processes inclusion list events.
+func (fs *FocilService) Stream(ctx context.Context, endpoints []config.Endpoint, beaconEndpoints []config.BeaconEndpoint) {
 
 	for _, beaconEndpoint := range beaconEndpoints {
-		go ils.streamBeaconUrl(ctx, beaconEndpoint)
+		go fs.streamBeaconUrl(ctx, beaconEndpoint)
 	}
 
 	for _, endpoint := range endpoints {
-		go ils.processClientInclusionList(ctx, endpoint)
+		go fs.processClientInclusionList(ctx, endpoint)
 	}
 
 	<-ctx.Done()
 }
 
-func (ils *InclusionListService) streamBeaconUrl(ctx context.Context, endpoint config.BeaconEndpoint) {
+func (fs *FocilService) streamBeaconUrl(ctx context.Context, endpoint config.BeaconEndpoint) {
 	sseURL := fmt.Sprintf("%s/eth/v1/events?topics=block&topics=inclusion_list", endpoint.BeaconUrl)
-	ils.logger.Info("Attempting connection to Beacon SSE endpoint", logger.Fields{
+	fs.logger.Info("Attempting connection to Beacon SSE endpoint", logger.Fields{
 		"url": sseURL,
 	})
 
@@ -61,7 +61,7 @@ func (ils *InclusionListService) streamBeaconUrl(ctx context.Context, endpoint c
 	go func() {
 		err := client.SubscribeRaw(func(msg *sse.Event) {
 			if len(msg.Data) == 0 {
-				ils.logger.Warn("Received empty SSE event data")
+				fs.logger.Warn("Received empty SSE event data")
 				return
 			}
 
@@ -74,7 +74,7 @@ func (ils *InclusionListService) streamBeaconUrl(ctx context.Context, endpoint c
 		errs <- err
 	}()
 
-	ils.logger.Info("Successfully subscribed to SSE stream")
+	fs.logger.Info("Successfully subscribed to SSE stream")
 
 	for {
 		select {
@@ -87,13 +87,13 @@ func (ils *InclusionListService) streamBeaconUrl(ctx context.Context, endpoint c
 				continue
 			}
 
-			if err := ils.handleInclusionListMessage(ctx, event.Data); err != nil {
-				ils.logger.Error("Failed to handle inclusion list message", err)
+			if err := fs.handleInclusionListMessage(ctx, event.Data); err != nil {
+				fs.logger.Error("Failed to handle inclusion list message", err)
 			}
 
 		case err := <-errs:
 			if err != nil {
-				ils.logger.Error("SSE subscription error", err)
+				fs.logger.Error("SSE subscription error", err)
 			}
 			return
 		}
@@ -101,10 +101,10 @@ func (ils *InclusionListService) streamBeaconUrl(ctx context.Context, endpoint c
 }
 
 // handleInclusionListMessage processes a single inclusion list message.
-func (ils *InclusionListService) handleInclusionListMessage(ctx context.Context, jsonData []byte) error {
+func (fs *FocilService) handleInclusionListMessage(ctx context.Context, jsonData []byte) error {
 	msg, err := parseInclusionListMessage(jsonData)
 	if err != nil {
-		ils.logger.Error("Failed to parse inclusion list message", logger.Fields{
+		fs.logger.Error("Failed to parse inclusion list message", logger.Fields{
 			"error": err,
 			"data":  string(jsonData),
 		})
@@ -116,14 +116,14 @@ func (ils *InclusionListService) handleInclusionListMessage(ctx context.Context,
 	for _, txDataHex := range msg.Data.Message.Transactions {
 		txData, err := hexutil.Decode(txDataHex)
 		if err != nil {
-			ils.logger.Error("Hex decode failed", "err", err)
+			fs.logger.Error("Hex decode failed", "err", err)
 			continue
 		}
 
 		tx := new(types.Transaction)
 		err = tx.UnmarshalBinary(txData)
 		if err != nil {
-			ils.logger.Error("UnmarshalBinary failed", "err", err)
+			fs.logger.Error("UnmarshalBinary failed", "err", err)
 			continue
 		}
 
@@ -137,9 +137,9 @@ func (ils *InclusionListService) handleInclusionListMessage(ctx context.Context,
 		return nil
 	}
 
-	updated, err := ils.updateInclusionScore(ctx, slot, txCount)
+	updated, err := fs.updateInclusionScore(ctx, slot, txCount)
 	if err != nil {
-		ils.logger.Error("Failed to update inclusion count", logger.Fields{
+		fs.logger.Error("Failed to update inclusion count", logger.Fields{
 			"error": err,
 			"slot":  slot,
 		})
@@ -147,15 +147,15 @@ func (ils *InclusionListService) handleInclusionListMessage(ctx context.Context,
 	}
 
 	if updated {
-		if err := ils.storeInclusionTransactions(ctx, slot, transactions); err != nil {
-			ils.logger.Error("Failed to store transaction list", logger.Fields{
+		if err := fs.storeInclusionTransactions(ctx, slot, transactions); err != nil {
+			fs.logger.Error("Failed to store transaction list", logger.Fields{
 				"error": err,
 				"slot":  slot,
 			})
 			return err
 		}
 
-		ils.logger.Info("Updated inclusion list", logger.Fields{
+		fs.logger.Info("Updated inclusion list", logger.Fields{
 			"slot":         slot,
 			"new_tx_count": txCount,
 		})
@@ -165,22 +165,22 @@ func (ils *InclusionListService) handleInclusionListMessage(ctx context.Context,
 }
 
 // storeInclusionTransactions saves the transactions for a given slot to a Redis HSET.
-func (ils *InclusionListService) storeInclusionTransactions(ctx context.Context, slot string, transactions []*types.Transaction) error {
+func (fs *FocilService) storeInclusionTransactions(ctx context.Context, slot string, transactions []*types.Transaction) error {
 	data, err := json.Marshal(transactions)
 	if err != nil {
 		return err
 	}
-	return ils.redis.HSet(ctx, utils.RedisInclusionListTxnsKey(), slot, data).Err()
+	return fs.redis.HSet(ctx, utils.RedisInclusionListTxnsKey(), slot, data).Err()
 }
 
 // updateInclusionScore updates the transaction count score in the Redis ZSET, only if the new count is greater.
-func (ils *InclusionListService) updateInclusionScore(ctx context.Context, slot string, txCount int) (bool, error) {
+func (fs *FocilService) updateInclusionScore(ctx context.Context, slot string, txCount int) (bool, error) {
 	z := redis.Z{
 		Score:  float64(txCount),
 		Member: slot,
 	}
 
-	updateCount, err := ils.redis.ZAddArgs(ctx, utils.RedisInclusionScoreKey(), redis.ZAddArgs{
+	updateCount, err := fs.redis.ZAddArgs(ctx, utils.RedisInclusionScoreKey(), redis.ZAddArgs{
 		GT:      true,
 		Members: []redis.Z{z},
 	}).Result()
@@ -207,11 +207,11 @@ func dialSSEConnection(sseURL string) *sse.Client {
 	return sse.NewClient(sseURL)
 }
 
-func (ils *InclusionListService) processClientInclusionList(ctx context.Context, endpoint config.Endpoint) {
+func (fs *FocilService) processClientInclusionList(ctx context.Context, endpoint config.Endpoint) {
 	// Dial WebSocket endpoint directly
 	client, err := ethclient.DialContext(ctx, endpoint.Websocket)
 	if err != nil {
-		ils.logger.Error("Failed to connect to WebSocket endpoint", "err", err.Error())
+		fs.logger.Error("Failed to connect to WebSocket endpoint", "err", err.Error())
 		return
 	}
 
@@ -219,13 +219,13 @@ func (ils *InclusionListService) processClientInclusionList(ctx context.Context,
 	headers := make(chan *types.Header)
 	sub, err := client.SubscribeNewHead(ctx, headers)
 	if err != nil {
-		ils.logger.Error("Error subscribing to newHeads", "err", err.Error())
+		fs.logger.Error("Error subscribing to newHeads", "err", err.Error())
 		return
 	}
 
 	defer sub.Unsubscribe()
 
-	ils.logger.Info("Subscribed to new block headers")
+	fs.logger.Info("Subscribed to new block headers")
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -237,17 +237,17 @@ func (ils *InclusionListService) processClientInclusionList(ctx context.Context,
 			wg.Wait()
 			return
 		case err := <-sub.Err():
-			ils.logger.Error("Subscription error", "err", err)
+			fs.logger.Error("Subscription error", "err", err)
 			return
 		case header := <-headers:
-			ils.logger.Info("New Block", "block_number", header.Number.String())
+			fs.logger.Info("New Block", "block_number", header.Number.String())
 			wg.Add(1)
-			go ils.processBlock(ctx, client, header.Number)
+			go fs.processBlock(ctx, client, header.Number)
 		}
 	}
 }
 
-func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *ethclient.Client, blockNumber *big.Int) {
+func (fs *FocilService) processBlock(ctx context.Context, ethClient *ethclient.Client, blockNumber *big.Int) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -259,7 +259,7 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 		// Fetch full block
 		block, err := ethClient.BlockByNumber(ctx, blockNumber)
 		if err != nil {
-			ils.logger.Error("Failed to fetch block", "blockNumber", blockNumber, "err", err)
+			fs.logger.Error("Failed to fetch block", "blockNumber", blockNumber, "err", err)
 			return
 		}
 
@@ -271,16 +271,16 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 
 		// Retrieve inclusion list txs from storage
 		slotKey := utils.RedisInclusionListTxnsKey()
-		ilTxData, err := ils.redis.HGet(ctx, slotKey, blockNumber.String()).Result()
+		ilTxData, err := fs.redis.HGet(ctx, slotKey, blockNumber.String()).Result()
 		if err != nil {
-			ils.logger.Warn("Failed to get inclusion list", "slotKey", slotKey, "err", err.Error(), "blocknumber", blockNumber)
+			fs.logger.Warn("Failed to get inclusion list", "slotKey", slotKey, "err", err.Error(), "blocknumber", blockNumber)
 			return
 		}
 
 		// Decode inclusion list txs (as array)
 		var ilTxs []*types.Transaction
 		if err := json.Unmarshal([]byte(ilTxData), &ilTxs); err != nil {
-			ils.logger.Error("Failed to decode IL txs array", "err", err)
+			fs.logger.Error("Failed to decode IL txs array", "err", err)
 			return
 		}
 
@@ -317,13 +317,13 @@ func (ils *InclusionListService) processBlock(ctx context.Context, ethClient *et
 
 		reportJSON, err := json.Marshal(report)
 		if err != nil {
-			ils.logger.Error("Failed to marshal inclusion report", "err", err)
+			fs.logger.Error("Failed to marshal inclusion report", "err", err)
 			return
 		}
 
 		// Store in hash under slot field
-		if err := ils.redis.HSet(ctx, inclusionReportKey, slot, reportJSON).Err(); err != nil {
-			ils.logger.Error("Failed to store inclusion report in hash", "err", err)
+		if err := fs.redis.HSet(ctx, inclusionReportKey, slot, reportJSON).Err(); err != nil {
+			fs.logger.Error("Failed to store inclusion report in hash", "err", err)
 		}
 	}
 }

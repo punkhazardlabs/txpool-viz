@@ -100,7 +100,7 @@ func (s *ClientStorage) updateStoredTx(ctx context.Context, txHash string, updat
 	return nil
 }
 
-func (s *ClientStorage) UpdateMinedTransaction(ctx context.Context, txHash string, tx *types.Transaction, blockTimestamp int64, receiptStatus uint64, blockNumber *big.Int, blockHash *common.Hash) error {
+func (s *ClientStorage) UpdateMinedTransaction(ctx context.Context, txHash string, tx *types.Transaction, blockTimestamp int64, receiptStatus uint64, blockNumber *big.Int, blockHash *common.Hash, gasUsed *uint64) error {
 	return s.updateStoredTx(ctx, txHash, func(storedTx *model.StoredTransaction) error {
 		storedTx.Metadata.Status = model.StatusMined
 		storedTx.Metadata.TimeMined = &blockTimestamp
@@ -125,6 +125,9 @@ func (s *ClientStorage) UpdateMinedTransaction(ctx context.Context, txHash strin
 		}
 		if blockHash != nil {
 			storedTx.Metadata.BlockHash = blockHash.Hex()
+		}
+		if gasUsed != nil {
+			storedTx.Metadata.GasUsed = *gasUsed
 		}
 
 		return nil

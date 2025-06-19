@@ -7,6 +7,7 @@ logs
 
 # Logs
 frontend/logs
+frontend/pkg
 frontend/*.log
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
