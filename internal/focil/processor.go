@@ -271,7 +271,8 @@ func (fs *FocilService) processBlock(ctx context.Context, ethClient *ethclient.C
 
 		// Retrieve inclusion list txs from storage
 		slotKey := utils.RedisInclusionListTxnsKey()
-		ilTxData, err := fs.redis.HGet(ctx, slotKey, blockNumber.String()).Result()
+		slotNumber := new(big.Int).Sub(blockNumber, big.NewInt(1))
+		ilTxData, err := fs.redis.HGet(ctx, slotKey, slotNumber.String()).Result()
 		if err != nil {
 			fs.logger.Warn("Failed to get inclusion list", "slotKey", slotKey, "err", err.Error(), "blocknumber", blockNumber)
 			return
