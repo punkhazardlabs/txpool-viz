@@ -46,12 +46,15 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 	// Launch queue monitor
 	go monitorQueueSize(ctx, srvc.Redis, srvc.Logger, queue)
 
+	maxConcurrent := 1000
+	sem := make(chan struct{}, maxConcurrent)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-
 		case <-ticker.C:
+
 			currentTime := time.Now().Unix()
 
 			txString, err := srvc.Redis.LPop(ctx, queue).Result()
@@ -69,7 +72,11 @@ func processEndpointQueue(ctx context.Context, endpoint *config.Endpoint, srvc *
 				continue
 			}
 
-			go processTransaction(ctx, tx[1], endpoint, srvc, storage, currentTime)
+			sem <- struct{}{}
+			go func(txHash string) {
+				defer func() { <-sem }()
+				processTransaction(ctx, txHash, endpoint, srvc, storage, currentTime)
+			}(tx[1])
 		}
 	}
 }

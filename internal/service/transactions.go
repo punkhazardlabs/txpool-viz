@@ -9,6 +9,7 @@ import (
 	"txpool-viz/utils"
 
 	"github.com/redis/go-redis/v9"
+	"sync"
 )
 
 type TransactionServiceImpl struct {
@@ -36,19 +37,30 @@ func (ts *TransactionServiceImpl) GetLatestNTransactions(ctx context.Context, n 
 		return nil, err
 	}
 
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
 	var transactions []model.ApiTxResponse
-	for _, z := range results {
-		txHash := z.Member.(string)
+	for _, result := range results {
+		wg.Add(1)
+		go func(res redis.Z) {
+			defer wg.Done()
 
-		txDetails, err := ts.GetTxDetails(ctx, txHash)
-		if err != nil {
-			ts.logger.Error("Couldn't get tx details", "txHash", txHash, "error", err)
-			continue
-		}
+			txHash := res.Member.(string)
 
-		transactions = append(transactions, txDetails)
+			txDetails, err := ts.GetTxDetails(ctx, txHash)
+			if err != nil {
+				ts.logger.Error("Couldn't get tx details", "txHash", txHash, "error", err)
+				return
+			}
+
+			mu.Lock()
+			transactions = append(transactions, txDetails)
+			mu.Unlock()
+		}(result)
 	}
 
+	wg.Wait()
 	return transactions, nil
 }
 
@@ -62,31 +74,45 @@ func (ts *TransactionServiceImpl) GetLatestTxSummaries(ctx context.Context, n in
 	metaKey := utils.RedisClientMetaKey(primary)
 
 	var out []model.TxSummary
-	for _, tx := range txs {
-		raw, err := ts.redis.HGet(ctx, metaKey, tx.Hash).Result()
-		if err != nil {
-			continue
-		}
-		var stx model.StoredTransaction
-		if err := json.Unmarshal([]byte(raw), &stx); err != nil {
-			continue
-		}
-		tx := stx.Tx
-		// parse strings to float64
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
-		out = append(out, model.TxSummary{
-			Hash:    stx.Hash,
-			From:    tx.From,
-			GasUsed: float64(stx.Metadata.GasUsed),
-			Nonce:   tx.Nonce,
-			Type:    tx.String(),
-		})
+	for _, tx := range txs {
+		wg.Add(1)
+		go func(txHash string) {
+			defer wg.Done()
+
+			raw, err := ts.redis.HGet(ctx, metaKey, txHash).Result()
+			if err != nil {
+				return
+			}
+			var stx model.StoredTransaction
+			if err := json.Unmarshal([]byte(raw), &stx); err != nil {
+				return
+			}
+			tx := stx.Tx
+
+			summary := model.TxSummary{
+				Hash:    stx.Hash,
+				From:    tx.From,
+				GasUsed: float64(stx.Metadata.GasUsed),
+				Nonce:   tx.Nonce,
+				Type:    tx.String(),
+			}
+
+			mu.Lock()
+			out = append(out, summary)
+			mu.Unlock()
+		}(tx.Hash)
 	}
+
+	wg.Wait()
 	return out, nil
 }
 
 func (ts *TransactionServiceImpl) GetTxDetails(ctx context.Context, txHash string) (model.ApiTxResponse, error) {
 	raw := make(map[string]model.StoredTransaction, len(ts.endpoints))
+
 	for _, endpoint := range ts.endpoints {
 		metaKey := utils.RedisClientMetaKey(endpoint.Name)
 
@@ -121,7 +147,6 @@ func (ts *TransactionServiceImpl) GetTxDetails(ctx context.Context, txHash strin
 	}
 
 	first := ts.endpoints[0].Name
-
 	txRes := Compute(txMaps, first)
 	metaRes := Compute(metaMaps, first)
 
