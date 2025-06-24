@@ -2,13 +2,10 @@ participants:
   - el_type: geth
     el_image: jihoonsg/geth-focil:e18848c
     cl_type: prysm
-    cl_image: jihoonsg/prysm-beacon-chain-focil:9d26fe2
-    vc_type: prysm
-    vc_image: jihoonsg/prysm-validator-focil:9d26fe2
   - el_type: geth
     el_image: jihoonsg/geth-focil:e18848c
-    cl_type: teku
-    cl_image: ethpandaops/teku:focil
+    cl_type: prysm
+    cl_image: jihoonsg/prysm-beacon-chain-focil:9d26fe2
 network_params:
   genesis_delay: 20
   electra_fork_epoch: 0
@@ -41,3 +38,7 @@ txpool_viz_params:
     min_gas_price:
   focil_enabled: "true"
   log_level: "info"
+  min_cpu: 100
+  max_cpu: 1000
+  min_mem: 128
+  max_mem: 1024
