@@ -46,6 +46,10 @@ txpool_viz_params:
     interval: 0.1s
     timeout: 5s
   filters:
-    min_gas_price:
+    min_gas_price: 1gwei
   focil_enabled: "false"
   log_level: "info"
+  min_cpu: 1000
+  max_cpu: 4000
+  min_mem: 128
+  max_mem: 1024
