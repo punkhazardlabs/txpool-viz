@@ -22,3 +22,4 @@ beacon_urls: # FOCIL Enabled beacon api endpoint. Leave blank if not needed
     beacon_url: "http://127.0.0.1:55426"
   - name: nethermind-teku 
     beacon_url: "http://127.0.0.1:55652"
+extra_args: []
