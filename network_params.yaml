@@ -53,3 +53,4 @@ txpool_viz_params:
   max_cpu: 4000
   min_mem: 128
   max_mem: 1024
+  env: {}
